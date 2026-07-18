@@ -1,0 +1,38 @@
+version: '3.8'
+
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: kevinbb_db
+    restart: always
+    environment:
+      POSTGRES_DB: kevinbb
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: password
+    ports:
+      - "5437:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+  web:
+    build: .
+    container_name: kevinbb_web
+    restart: always
+    command: >
+      sh -c "python manage.py migrate &&
+             python manage.py runserver 0.0.0.0:4848"
+    ports:
+      - "4848:4848"
+    volumes:
+      - .:/app
+      - media_volume:/app/media
+    environment:
+      - DATABASE_URL=postgres://postgres:password@db:5432/kevinbb
+    env_file:
+      - .env
+    depends_on:
+      - db
+
+volumes:
+  pgdata:
+  media_volume:
