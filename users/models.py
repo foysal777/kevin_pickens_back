@@ -30,7 +30,7 @@ class Avatar(BaseModel):
     avatar = models.ImageField(upload_to='avatars/')
     is_cartoon = models.BooleanField(default=False)
     heygen_avatar_id = models.CharField(max_length=255, blank=True, null=True)
-    heygen_preview_url = models.URLField(blank=True, null=True)
+    heygen_preview_url = models.TextField(blank=True, null=True)  # URLField max_length too short for HeyGen signed URLs
     heygen_image_urls = models.JSONField(blank=True, null=True)
 
     def __str__(self):

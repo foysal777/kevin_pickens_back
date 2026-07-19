@@ -667,7 +667,10 @@ def test_ai(avatar_file, voice_file, cartoon_style: bool = False) -> str | None:
         avatar_path = str(Path(avatar_file))
     else:
         avatar_path = _save_uploaded_file(avatar_file, f"uploaded_avatar{Path(avatar_file.name).suffix}")
-    voice_path = _save_uploaded_file(voice_file, f"uploaded_voice{Path(voice_file.name).suffix}")
+    if isinstance(voice_file, (str, Path)):
+        voice_path = str(Path(voice_file))
+    else:
+        voice_path = _save_uploaded_file(voice_file, f"uploaded_voice{Path(voice_file.name).suffix}")
 
     image_asset_id = _upload_asset(avatar_path, _guess_mime(avatar_path))
     if not image_asset_id:
@@ -785,8 +788,8 @@ def _wait_for_avatar(look_id: str, fallback_url: str,
     else:
         info("Photo avatars typically reach 'completed' within 15-60s.")
     url = f"{HEYGEN_BASE}/v3/avatars/looks/{look_id}"
-    # Use longer interval for cartoon (no need to hammer the API every 10s)
-    elapsed, interval = 0, 20 if is_cartoon else 10
+    # Use 5 seconds interval for faster web API response
+    elapsed, interval = 0, 5
     preview_url = fallback_url
 
     while elapsed < max_wait:

@@ -9,6 +9,27 @@ from rest_framework import status
 from . import models, serializers, tasks
 from ai_file import test_ai
 
+from rest_framework.parsers import MultiPartParser, FormParser
+
+try:
+    from drf_yasg.utils import swagger_auto_schema
+    from drf_yasg import openapi
+    HAS_YASG = True
+except ImportError:
+    HAS_YASG = False
+    class openapi:
+        IN_FORM = 'form'
+        TYPE_FILE = 'file'
+        TYPE_BOOLEAN = 'boolean'
+        class Parameter:
+            def __init__(self, *args, **kwargs):
+                pass
+    def swagger_auto_schema(*args, **kwargs):
+        def decorator(func):
+            return func
+        return decorator
+
+
 
 def _build_absolute_video_url(request, video_url: str) -> str:
     if not video_url:
@@ -72,15 +93,46 @@ class UserProfileView(generics.CreateAPIView, generics.RetrieveUpdateDestroyAPIV
     queryset = models.User.objects.all()
     serializer_class = serializers.UserSerializer  
     permission_classes = [AllowAny]  
-
-
-
 class UploadAvatarView(generics.CreateAPIView):
     queryset = models.Avatar.objects.all()
-    serializer_class = serializers.AvatarList 
-    permission_classes = [AllowAny]  
+    serializer_class = serializers.AvatarList
+    permission_classes = [AllowAny]
+    parser_classes = [MultiPartParser, FormParser]
 
-
+    @swagger_auto_schema(
+        operation_id="image_upload_to_avatar",
+        operation_description=(
+            "Upload an image file and generate a HeyGen cartoon avatar.\n\n"
+            "Steps:\n"
+            "1. Converts the image to a cartoon locally (via PIL).\n"
+            "2. Uploads the cartoon image to HeyGen asset manager.\n"
+            "3. Dispatches HeyGen avatar creation asynchronously.\n"
+            "4. Returns the locally generated cartoon image immediately as `heygen_generated_image`."
+        ),
+        manual_parameters=[
+            openapi.Parameter(
+                name="avatar",
+                in_=openapi.IN_FORM,
+                type=openapi.TYPE_FILE,
+                required=True,
+                description="Avatar photo/image file to upload"
+            ),
+            openapi.Parameter(
+                name="is_cartoon",
+                in_=openapi.IN_FORM,
+                type=openapi.TYPE_BOOLEAN,
+                required=False,
+                default=False,
+                description="If true, skip PIL cartoon conversion (treat input as already cartoonised)"
+            )
+        ],
+        responses={
+            201: serializers.AvatarList,
+            400: "Bad Request (e.g. missing avatar)",
+            500: "Internal Server Error (e.g. PIL cartoon generation failed)"
+        },
+        tags=["Avatar"]
+    )
     def post(self, request, *args, **kwargs):
         # Skip serializer validation here because AvatarList serializer
         # is read-only for `avatar` (returns absolute URL). Handle
@@ -126,26 +178,64 @@ class UploadAvatarView(generics.CreateAPIView):
 
         # After saving locally, upload the image to HeyGen and create a cartoon avatar there
         heygen_avatar = None
+        heygen_info = None
         try:
             img_path = avatar_instance.avatar.path
             mime = test_ai._guess_mime(img_path)
             image_asset_id = test_ai._upload_asset(img_path, mime)
             if image_asset_id:
-                # Create cartoon avatar on HeyGen using uploaded asset without long-polling (wait=False)
-                heygen_avatar = test_ai._create_cartoon_avatar(image_asset_id, avatar_name=f"avatar_{avatar_instance.id}", wait=False)
+                # Create cartoon avatar on HeyGen using uploaded asset with long-polling (wait=True)
+                heygen_avatar = test_ai._create_cartoon_avatar(image_asset_id, avatar_name=f"avatar_{avatar_instance.id}", wait=True)
                 if heygen_avatar and isinstance(heygen_avatar, dict) and heygen_avatar.get("avatar_id"):
                     avatar_instance.heygen_avatar_id = heygen_avatar.get("avatar_id")
                     avatar_instance.save(update_fields=["heygen_avatar_id"])
+
+                    # Fetch the completed avatar info from HeyGen
+                    try:
+                        heygen_info = test_ai.fetch_heygen_avatar_info(avatar_instance.heygen_avatar_id)
+                        if heygen_info:
+                            preview = heygen_info.get("preview_image_url") or heygen_avatar.get("preview_url") or ""
+                            img_urls = heygen_info.get("image_urls") or []
+                            if not img_urls and preview:
+                                img_urls = [preview]
+                            # Persist to DB since it's now ready
+                            if preview or img_urls:
+                                avatar_instance.heygen_preview_url = preview
+                                avatar_instance.heygen_image_urls = img_urls
+                                avatar_instance.save(update_fields=["heygen_preview_url", "heygen_image_urls"])
+                    except Exception as fe:
+                        print(f"[image-upload-to-avatar] fetch_heygen_avatar_info failed: {fe}")
         except Exception as e:
             print(f"[image-upload-to-avatar] HeyGen avatar creation failed: {e}")
 
         # Return using serializer so output matches AvatarList format (absolute URL)
+        # Refresh from DB so serializer sees persisted heygen_preview_url / heygen_image_urls
+        avatar_instance.refresh_from_db()
         out_serializer = serializers.AvatarList(avatar_instance, context={"request": request})
         data = out_serializer.data
-        if heygen_avatar:
-            data["heygen_avatar"] = heygen_avatar
-        else:
-            data["heygen_avatar"] = None
+
+        # Inject heygen_avatar context + ensure image fields are populated from heygen_info
+        data["heygen_avatar"] = heygen_avatar or None
+
+        # If serializer returned empty urls but we have data from heygen_info, patch them in
+        if heygen_info:
+            if not data.get("heygen_image_urls") and heygen_info.get("image_urls"):
+                data["heygen_image_urls"] = heygen_info["image_urls"]
+            if not data.get("heygen_preview_url") and heygen_info.get("preview_image_url"):
+                data["heygen_preview_url"] = heygen_info["preview_image_url"]
+            if not data.get("heygen_avatar_info"):
+                data["heygen_avatar_info"] = heygen_info
+
+        # Ensure heygen_generated_image is always present:
+        # prioritise HeyGen CDN preview → first image_url → local avatar file
+        if not data.get("heygen_generated_image"):
+            generated_img = (
+                data.get("heygen_preview_url")
+                or (data.get("heygen_image_urls") or [None])[0]
+                or data.get("avatar")
+            )
+            data["heygen_generated_image"] = generated_img
+
         return Response(data, status=status.HTTP_201_CREATED)
 
 
@@ -153,7 +243,48 @@ class UploadAvatarView(generics.CreateAPIView):
 class GenerateVideoView(generics.CreateAPIView):
     permission_classes = [AllowAny]
     serializer_class = serializers.UploadAvatarAndVoiceSerializer
+    parser_classes = [MultiPartParser, FormParser]
 
+    @swagger_auto_schema(
+        operation_id="generate_video",
+        operation_description="Generate video from uploaded avatar image (or avatar_id) and voice sample",
+        manual_parameters=[
+            openapi.Parameter(
+                name="voice_sample",
+                in_=openapi.IN_FORM,
+                type=openapi.TYPE_FILE,
+                required=True,
+                description="Audio/voice sample file"
+            ),
+            openapi.Parameter(
+                name="avatar",
+                in_=openapi.IN_FORM,
+                type=openapi.TYPE_FILE,
+                required=False,
+                description="Avatar image file (if avatar_id is not provided)"
+            ),
+            openapi.Parameter(
+                name="avatar_id",
+                in_=openapi.IN_FORM,
+                type=openapi.TYPE_INTEGER,
+                required=False,
+                description="ID of an existing avatar (if avatar file is not provided)"
+            ),
+            openapi.Parameter(
+                name="is_cartoon",
+                in_=openapi.IN_FORM,
+                type=openapi.TYPE_BOOLEAN,
+                required=False,
+                default=False,
+                description="Whether to treat/convert avatar as a cartoon style"
+            )
+        ],
+        responses={
+            202: "Accepted (Video generation started in background)",
+            400: "Bad Request"
+        },
+        tags=["Video"]
+    )
     def post(self, request, *args, **kwargs):
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
@@ -199,20 +330,35 @@ class GenerateVideoView(generics.CreateAPIView):
             status='processing'
         )
 
-        # Trigger celery task asynchronously
-        tasks.generate_video_task.delay(
+        # Trigger task synchronously (blocking request until video is generated)
+        tasks.generate_video_task(
             generated.id,
             avatar_input_path,
             voice_sample_path,
             cartoon_style=cartoon_style
         )
 
-        # Return response immediately
-        return Response({
-            "message": "Video generation started in background.",
-            "id": generated.id,
-            "status": "processing"
-        }, status=status.HTTP_202_ACCEPTED)
+        # Refresh from database to get the generated video URL
+        generated.refresh_from_db()
+        video_data = serializers.GeneratedVideoSerializer(generated, context={"request": request}).data
+
+        if generated.status == 'completed':
+            return Response({
+                "message": "Video generated successfully.",
+                "id": generated.id,
+                "status": "completed",
+                "hygen_video": video_data,
+                "heygen_video": video_data
+            }, status=status.HTTP_201_CREATED)
+        else:
+            return Response({
+                "message": "Video generation failed.",
+                "id": generated.id,
+                "status": generated.status,
+                "error_message": generated.error_message,
+                "hygen_video": video_data,
+                "heygen_video": video_data
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 
@@ -257,8 +403,8 @@ class TextToVideoView(generics.CreateAPIView):
             status='processing'
         )
 
-        # Trigger Celery task
-        tasks.text_to_video_task.delay(
+        # Trigger Celery task synchronously (blocking request until video is generated)
+        tasks.text_to_video_task(
             generated.id,
             text,
             avatar_id,
@@ -266,9 +412,24 @@ class TextToVideoView(generics.CreateAPIView):
             voice_id
         )
 
-        # Return response immediately
-        return Response({
-            "message": "Video generation started in background.",
-            "id": generated.id,
-            "status": "processing"
-        }, status=status.HTTP_202_ACCEPTED)
+        # Refresh from database to get the generated video URL
+        generated.refresh_from_db()
+        video_data = serializers.GeneratedVideoSerializer(generated, context={"request": request}).data
+
+        if generated.status == 'completed':
+            return Response({
+                "message": "Video generated successfully.",
+                "id": generated.id,
+                "status": "completed",
+                "hygen_video": video_data,
+                "heygen_video": video_data
+            }, status=status.HTTP_201_CREATED)
+        else:
+            return Response({
+                "message": "Video generation failed.",
+                "id": generated.id,
+                "status": generated.status,
+                "error_message": generated.error_message,
+                "hygen_video": video_data,
+                "heygen_video": video_data
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)

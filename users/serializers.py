@@ -19,10 +19,16 @@ class AvatarList(serializers.ModelSerializer):
     heygen_avatar_info = serializers.SerializerMethodField()
     heygen_preview_url = serializers.SerializerMethodField()
     heygen_image_urls = serializers.SerializerMethodField()
+    heygen_generated_image = serializers.SerializerMethodField()
 
     class Meta:
         model = models.Avatar
-        fields = ['id', 'avatar', 'is_cartoon', 'created_at', 'heygen_avatar_id', 'heygen_preview_url', 'heygen_image_urls', 'heygen_avatar_info']
+        fields = [
+            'id', 'avatar', 'is_cartoon', 'created_at',
+            'heygen_generated_image',
+            'heygen_avatar_id', 'heygen_preview_url', 'heygen_image_urls',
+            'heygen_avatar_info',
+        ]
 
     def get_avatar(self, obj):
         request = self.context.get('request')
@@ -81,6 +87,7 @@ class AvatarList(serializers.ModelSerializer):
 
         # Normalize image URLs — make absolute if request available and URL is relative
         normalized = dict(info)
+        avatar_status = normalized.get('status', '')
         img_list = normalized.get('image_urls') or []
         norm_urls = []
         for u in img_list:
@@ -99,13 +106,24 @@ class AvatarList(serializers.ModelSerializer):
             normalized['preview_image_url'] = p
 
         normalized['image_urls'] = norm_urls
-        # Persist preview + image urls to DB for faster future reads
-        try:
-            obj.heygen_preview_url = normalized.get('preview_image_url')
-            obj.heygen_image_urls = norm_urls
-            obj.save(update_fields=['heygen_preview_url', 'heygen_image_urls'])
-        except Exception:
-            pass
+
+        # Only persist to DB when avatar is ready (not still processing).
+        # Saving empty values during "processing" would permanently null out the fields.
+        is_ready = avatar_status in ('completed', 'active')
+        if is_ready and (norm_urls or preview):
+            try:
+                obj.heygen_preview_url = normalized.get('preview_image_url')
+                obj.heygen_image_urls = norm_urls
+                obj.save(update_fields=['heygen_preview_url', 'heygen_image_urls'])
+            except Exception:
+                pass
+        elif not is_ready:
+            # Fall back to previously persisted values so the response still
+            # returns whatever was cached from a prior successful fetch.
+            if not norm_urls and obj.heygen_image_urls:
+                normalized['image_urls'] = obj.heygen_image_urls
+            if not normalized.get('preview_image_url') and obj.heygen_preview_url:
+                normalized['preview_image_url'] = obj.heygen_preview_url
 
         # Also expose the persisted fields at top-level for serializer convenience
         normalized['persisted_preview_url'] = obj.heygen_preview_url
@@ -127,11 +145,43 @@ class AvatarList(serializers.ModelSerializer):
             return info.get('image_urls')
         return obj.heygen_image_urls or []
 
+    def get_heygen_generated_image(self, obj):
+        """Return the locally generated cartoon avatar image as an absolute URL.
+        This is available immediately after upload — unlike heygen_image_urls
+        which requires waiting for HeyGen async processing (2-10 mins).
+        Priority: heygen_preview_url (HeyGen CDN) → heygen_image_urls[0] → local avatar file.
+        """
+        request = self.context.get('request')
+
+        # 1. Use HeyGen CDN preview URL if already available
+        if obj.heygen_preview_url:
+            return obj.heygen_preview_url
+
+        # 2. Use first URL from persisted heygen_image_urls list
+        if obj.heygen_image_urls:
+            urls = obj.heygen_image_urls if isinstance(obj.heygen_image_urls, list) else []
+            if urls:
+                return urls[0]
+
+        # 3. Fall back to the locally saved avatar image (cartoon converted by PIL)
+        if obj.avatar:
+            url = (obj.avatar.url or '').strip().strip('"').strip("'")
+            if url:
+                if request:
+                    return request.build_absolute_uri(url)
+                return url
+
+        return None
+
 
 class VoiceSampleList(serializers.ModelSerializer):
     class Meta:
         model = models.VoiceSample
         fields = ['id', 'voice_sample', 'created_at']
+
+class UploadAvatarSerializer(serializers.Serializer):
+    avatar = serializers.ImageField(required=True, help_text="Image file to upload")
+    is_cartoon = serializers.BooleanField(required=False, default=False, help_text="If true, treat uploaded image as cartoon (skips local cartoonisation)")
 
 class UploadAvatarAndVoiceSerializer(serializers.Serializer):
     avatar_id = serializers.IntegerField(required=False)
