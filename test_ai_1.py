@@ -28,24 +28,46 @@ DEFAULT_AVATARS = {
 }
 
 # Fixed System Prompt for Cartoon Avatar Generation (Standup Comedy)
+# CARTOON_AVATAR_SYSTEM_PROMPT = """
+# Transform this person's photo into an expressive cartoon avatar for standup comedy performances.
+
+# Requirements:
+# - Convert the realistic face into a vibrant, animated cartoon style
+# - Exaggerate facial features (eyes, smile) to enhance comedic expression
+# - Use bright, saturated colors with bold outlines
+# - Style: Modern cartoon animation (similar to animated sitcoms or comedy specials)
+# - Include stage-ready attire appropriate for standup comedy
+# - Make the avatar appear confident, energetic, and performance-ready
+# - Ensure high expressiveness to convey comedy emotions and punchlines
+# - Keep proportions recognizable but distinctly cartoon-like
+# - Use warm, friendly color palette to appeal to comedy audiences
+
+# Context: This avatar will perform standup comedy material with lip-sync video. 
+# Prioritize expressions that convey humor, timing, and stage presence.
+# """
 CARTOON_AVATAR_SYSTEM_PROMPT = """
-Transform this person's photo into an expressive cartoon avatar for standup comedy performances.
-
-Requirements:
-- Convert the realistic face into a vibrant, animated cartoon style
-- Exaggerate facial features (eyes, smile) to enhance comedic expression
-- Use bright, saturated colors with bold outlines
-- Style: Modern cartoon animation (similar to animated sitcoms or comedy specials)
-- Include stage-ready attire appropriate for standup comedy
-- Make the avatar appear confident, energetic, and performance-ready
-- Ensure high expressiveness to convey comedy emotions and punchlines
-- Keep proportions recognizable but distinctly cartoon-like
-- Use warm, friendly color palette to appeal to comedy audiences
-
-Context: This avatar will perform standup comedy material with lip-sync video. 
-Prioritize expressions that convey humor, timing, and stage presence.
+Transform this person's photo into a friendly, 2D vector-style cartoon avatar for a standup comedy lip-sync performance. Maintain the subject's exact identity, Attire, skin tone, and hair, but apply the following specific style constraints:
+ 
+Style & Rendering:
+ 
+Create a 2D vector art illustration with a modern digital cartoon aesthetic.
+ 
+Use flat, vibrant colors with crisp, clean bold black outlines.
+ 
+Apply smooth, sharp cel-shaded lighting. Strictly avoid harsh, dark, or dramatic shadows.
+ 
+Keep the background simple, solid, and minimalist.
+ 
+Expression & Vibe (Crucial):
+ 
+The avatar must look incredibly warm, cheerful, energetic, and approachable.
+ 
+Enhance the smile and eyes to be bright and positive for comedy, but strictly avoid over-exaggerating facial features.
+ 
+Do not use sharp angles, heavily arched eyebrows, or overly wide grins. Ensure the character looks kind, not sinister or villainous.
+ 
+Keep facial proportions recognizable, soft, and distinctly human.
 """
-
 SUMMARY = {
     "run_time":    datetime.now().isoformat(),
     "avatar":      {},
