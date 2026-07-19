@@ -6,7 +6,7 @@ from rest_framework import generics
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from rest_framework import status
-from . import models, serializers
+from . import models, serializers, tasks
 from ai_file import test_ai
 
 
@@ -19,6 +19,26 @@ def _build_absolute_video_url(request, video_url: str) -> str:
         return request.build_absolute_uri(video_url)
     base = request.build_absolute_uri("/").rstrip("/")
     return f"{base}/api{video_url}"
+
+
+def _save_uploaded_file_temp(uploaded_file, prefix="file") -> str:
+    import os
+    import time
+    from pathlib import Path
+    from django.conf import settings
+    
+    temp_dir = Path(settings.MEDIA_ROOT) / "temp"
+    temp_dir.mkdir(parents=True, exist_ok=True)
+    
+    ext = Path(uploaded_file.name).suffix
+    filename = f"{prefix}_{int(time.time())}_{os.urandom(4).hex()}{ext}"
+    dest_path = temp_dir / filename
+    
+    with open(dest_path, 'wb+') as destination:
+        for chunk in uploaded_file.chunks():
+            destination.write(chunk)
+            
+    return str(dest_path)
 
 
 
@@ -37,9 +57,9 @@ def _get_heygen_avatar_payload(avatar_obj, is_cartoon: bool):
         return None
 
     if is_cartoon or avatar_obj.is_cartoon:
-        payload = test_ai._create_cartoon_avatar(image_asset_id)
+        payload = test_ai._create_cartoon_avatar(image_asset_id, wait=False)
     else:
-        payload = test_ai._create_photo_avatar(image_asset_id)
+        payload = test_ai._create_photo_avatar(image_asset_id, wait=False)
 
     if payload and isinstance(payload, dict) and payload.get("avatar_id"):
         avatar_obj.heygen_avatar_id = payload.get("avatar_id")
@@ -111,8 +131,8 @@ class UploadAvatarView(generics.CreateAPIView):
             mime = test_ai._guess_mime(img_path)
             image_asset_id = test_ai._upload_asset(img_path, mime)
             if image_asset_id:
-                # Create cartoon avatar on HeyGen using uploaded asset
-                heygen_avatar = test_ai._create_cartoon_avatar(image_asset_id, avatar_name=f"avatar_{avatar_instance.id}")
+                # Create cartoon avatar on HeyGen using uploaded asset without long-polling (wait=False)
+                heygen_avatar = test_ai._create_cartoon_avatar(image_asset_id, avatar_name=f"avatar_{avatar_instance.id}", wait=False)
                 if heygen_avatar and isinstance(heygen_avatar, dict) and heygen_avatar.get("avatar_id"):
                     avatar_instance.heygen_avatar_id = heygen_avatar.get("avatar_id")
                     avatar_instance.save(update_fields=["heygen_avatar_id"])
@@ -146,6 +166,8 @@ class GenerateVideoView(generics.CreateAPIView):
         if not voice_sample:
             return Response({"error": "Voice sample is required."}, status=status.HTTP_400_BAD_REQUEST)
         
+        # Save voice sample to temp path so celery task can access it
+        voice_sample_path = _save_uploaded_file_temp(voice_sample, prefix="voice")
 
         cartoon_style = False
         if avatar_id:
@@ -153,30 +175,44 @@ class GenerateVideoView(generics.CreateAPIView):
                 avatar_obj = models.Avatar.objects.get(id=avatar_id)
             except models.Avatar.DoesNotExist:
                 return Response({"error": "Avatar with the given id does not exist."}, status=status.HTTP_400_BAD_REQUEST)
-            avatar_input = avatar_obj.avatar.path
+            avatar_input_path = avatar_obj.avatar.path
             if avatar_obj.is_cartoon or is_cartoon:
                 cartoon_style = True
         else:
-            avatar_input = avatar_file
+            if not avatar_file:
+                return Response({"error": "Provide either avatar_id or avatar file."}, status=status.HTTP_400_BAD_REQUEST)
+            
+            # Save uploaded avatar to temp path
+            avatar_input_path = _save_uploaded_file_temp(avatar_file, prefix="avatar")
             if not is_cartoon:
-                cartoon_image = test_ai.cartoon_image_generator(avatar_input)
+                cartoon_image = test_ai.cartoon_image_generator(avatar_input_path)
                 if not cartoon_image:
                     return Response({"error": "Cartoon image generation failed."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-                avatar_input = cartoon_image
+                avatar_input_path = cartoon_image
                 cartoon_style = True
             else:
                 cartoon_style = True
 
+        # Create GeneratedVideo record immediately in 'processing' status
+        generated = models.GeneratedVideo.objects.create(
+            avatar_id=avatar_id if avatar_id else None,
+            status='processing'
+        )
 
+        # Trigger celery task asynchronously
+        tasks.generate_video_task.delay(
+            generated.id,
+            avatar_input_path,
+            voice_sample_path,
+            cartoon_style=cartoon_style
+        )
 
-
-        video_url = test_ai.test_ai(avatar_input, voice_sample, cartoon_style=cartoon_style)
-        if not video_url:
-            return Response({"error": "Video generation failed."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
-        full_url = _build_absolute_video_url(request, video_url)
-        generated = models.GeneratedVideo.objects.create(avatar_id=avatar_id if avatar_id else None, video_url=full_url)
-        return Response({"message": "Video generated successfully.", "id": generated.id, "video_url": full_url}, status=status.HTTP_200_OK)
+        # Return response immediately
+        return Response({
+            "message": "Video generation started in background.",
+            "id": generated.id,
+            "status": "processing"
+        }, status=status.HTTP_202_ACCEPTED)
 
 
 
@@ -215,46 +251,24 @@ class TextToVideoView(generics.CreateAPIView):
         is_cartoon = serializer.validated_data.get('is_cartoon', False)
         voice_id = serializer.validated_data.get('voice_id')
 
-        # 1) Convert text -> speech via ElevenLabs
-        tts_path, tts_err = test_ai.elevenlabs_tts_noninteractive(text, voice_id=voice_id, out_name=f"tts_{int(time.time())}.mp3")
-        if tts_err:
-            return Response({"error": "TTS conversion failed.", "detail": tts_err}, status=status.HTTP_502_BAD_GATEWAY)
-        if not tts_path:
-            return Response({"error": "TTS conversion failed."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        # Create GeneratedVideo record immediately in 'processing' status
+        generated = models.GeneratedVideo.objects.create(
+            avatar_id=avatar_id if avatar_id else None,
+            status='processing'
+        )
 
-        # 2) Upload audio to HeyGen
-        audio_asset_id = test_ai._upload_audio_to_heygen(Path(tts_path))
-        if not audio_asset_id:
-            return Response({"error": "Failed to upload audio to HeyGen."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        # Trigger Celery task
+        tasks.text_to_video_task.delay(
+            generated.id,
+            text,
+            avatar_id,
+            is_cartoon,
+            voice_id
+        )
 
-        # 3) Determine avatar payload
-        avatar_payload = None
-        # If avatar_id provided and is numeric, treat it as DB Avatar
-        if avatar_id:
-            try:
-                aid = int(avatar_id)
-                avatar_obj = models.Avatar.objects.get(id=aid)
-                avatar_payload = _get_heygen_avatar_payload(avatar_obj, is_cartoon)
-                if not avatar_payload:
-                    return Response({"error": "Failed to prepare HeyGen avatar payload."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-            except ValueError:
-                avatar_payload = None
-            except models.Avatar.DoesNotExist:
-                return Response({"error": "Avatar not found."}, status=status.HTTP_400_BAD_REQUEST)
-
-        # If no DB avatar provided, fall back to default preset avatar
-        if not avatar_payload:
-            # pick preset 1
-            preset = test_ai.DEFAULT_AVATARS.get("1")
-            avatar_payload = {"source": "default", "avatar_id": preset["avatar_id"], "name": preset["name"], "engine": "avatar_iv"}
-
-        # 4) Generate video using HeyGen
-        video_url = test_ai.generate_video(avatar_payload, audio_asset_id)
-        if not video_url:
-            return Response({"error": "Video generation failed."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
-        # 5) Return absolute URL
-        from django.shortcuts import resolve_url
-        full_url = request.build_absolute_uri(video_url) if not video_url.startswith('http') else video_url
-        generated = models.GeneratedVideo.objects.create(avatar_id=avatar_id if avatar_id else None, video_url=full_url)
-        return Response({"id": generated.id, "video_url": full_url}, status=status.HTTP_200_OK)
+        # Return response immediately
+        return Response({
+            "message": "Video generation started in background.",
+            "id": generated.id,
+            "status": "processing"
+        }, status=status.HTTP_202_ACCEPTED)

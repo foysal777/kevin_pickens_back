@@ -49,9 +49,9 @@ class AvatarList(serializers.ModelSerializer):
                 if not image_asset_id:
                     return None
                 if obj.is_cartoon:
-                    payload = test_ai._create_cartoon_avatar(image_asset_id, avatar_name=f"avatar_{obj.id}")
+                    payload = test_ai._create_cartoon_avatar(image_asset_id, avatar_name=f"avatar_{obj.id}", wait=False)
                 else:
-                    payload = test_ai._create_photo_avatar(image_asset_id, avatar_name=f"avatar_{obj.id}")
+                    payload = test_ai._create_photo_avatar(image_asset_id, avatar_name=f"avatar_{obj.id}", wait=False)
                 if payload and isinstance(payload, dict) and payload.get('avatar_id'):
                     obj.heygen_avatar_id = payload.get('avatar_id')
                     try:
@@ -202,10 +202,12 @@ class GeneratedVideoSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = models.GeneratedVideo
-        fields = ['id', 'avatar', 'video_url', 'created_at']
+        fields = ['id', 'avatar', 'video_url', 'status', 'error_message', 'created_at']
 
     def get_video_url(self, obj):
         url = obj.video_url
+        if not url:
+            return None
         fixed_url = get_or_fix_video_url(url, created_at=obj.created_at)
         
         if fixed_url != url:

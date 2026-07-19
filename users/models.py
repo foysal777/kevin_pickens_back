@@ -46,7 +46,17 @@ class VoiceSample(BaseModel):
 
 class GeneratedVideo(BaseModel):
     avatar = models.ForeignKey(Avatar, on_delete=models.SET_NULL, null=True, blank=True)
-    video_url = models.URLField()
+    video_url = models.URLField(blank=True, null=True)
+    status = models.CharField(
+        max_length=20,
+        default='processing',
+        choices=[
+            ('processing', 'Processing'),
+            ('completed', 'Completed'),
+            ('failed', 'Failed'),
+        ]
+    )
+    error_message = models.TextField(blank=True, null=True)
 
     def __str__(self):
-        return f"Generated Video at {self.video_url}"
+        return f"Generated Video at {self.video_url or 'processing'}"

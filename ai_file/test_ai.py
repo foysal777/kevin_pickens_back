@@ -489,7 +489,7 @@ def _guess_mime(file_path: str) -> str:
     return mime
 
 
-def _create_photo_avatar(image_asset_id: str, avatar_name: str = "UploadedAvatar") -> dict | None:
+def _create_photo_avatar(image_asset_id: str, avatar_name: str = "UploadedAvatar", wait: bool = True) -> dict | None:
     payload = {
         "type": "photo",
         "name": avatar_name,
@@ -499,10 +499,10 @@ def _create_photo_avatar(image_asset_id: str, avatar_name: str = "UploadedAvatar
         },
     }
     info(f"Creating avatar from uploaded photo:\n{json.dumps(payload, indent=4)}")
-    return _create_avatar_from_payload(payload, avatar_name, is_cartoon=False)
+    return _create_avatar_from_payload(payload, avatar_name, is_cartoon=False, wait=wait)
 
 
-def _create_cartoon_avatar(image_asset_id: str, avatar_name: str = "UploadedCartoonAvatar") -> dict | None:
+def _create_cartoon_avatar(image_asset_id: str, avatar_name: str = "UploadedCartoonAvatar", wait: bool = True) -> dict | None:
     payload = {
         "type": "prompt",
         "name": avatar_name,
@@ -512,10 +512,10 @@ def _create_cartoon_avatar(image_asset_id: str, avatar_name: str = "UploadedCart
         ],
     }
     info(f"Creating cartoon avatar from uploaded image:\n{json.dumps(payload, indent=4)}")
-    return _create_avatar_from_payload(payload, avatar_name, is_cartoon=True)
+    return _create_avatar_from_payload(payload, avatar_name, is_cartoon=True, wait=wait)
 
 
-def _create_avatar_from_payload(payload: dict, avatar_name: str, is_cartoon: bool) -> dict | None:
+def _create_avatar_from_payload(payload: dict, avatar_name: str, is_cartoon: bool, wait: bool = True) -> dict | None:
     try:
         r = requests.post(
             f"{HEYGEN_BASE}/v3/avatars",
@@ -552,6 +552,11 @@ def _create_avatar_from_payload(payload: dict, avatar_name: str, is_cartoon: boo
 
         if status in READY_STATUSES:
             ok(f"Avatar ready immediately: {look_id}")
+            SUMMARY["avatar"]["final_status"] = status
+            return {"source": "custom", "avatar_id": look_id, "name": avatar_name, "preview_url": preview_url, "engine": engine}
+
+        if not wait:
+            # Return immediately without waiting for it to compile/process
             SUMMARY["avatar"]["final_status"] = status
             return {"source": "custom", "avatar_id": look_id, "name": avatar_name, "preview_url": preview_url, "engine": engine}
 
