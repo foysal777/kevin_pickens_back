@@ -17,8 +17,8 @@ class AvatarList(serializers.ModelSerializer):
     avatar = serializers.SerializerMethodField()
     heygen_avatar_id = serializers.CharField(read_only=True)
     heygen_avatar_info = serializers.SerializerMethodField()
-    heygen_preview_url = serializers.CharField(read_only=True)
-    heygen_image_urls = serializers.ListField(child=serializers.CharField(), read_only=True)
+    heygen_preview_url = serializers.SerializerMethodField()
+    heygen_image_urls = serializers.SerializerMethodField()
 
     class Meta:
         model = models.Avatar
@@ -34,7 +34,12 @@ class AvatarList(serializers.ModelSerializer):
             return request.build_absolute_uri(url)
         return url
 
-    def get_heygen_avatar_info(self, obj):
+    def _get_cached_heygen_info(self, obj):
+        if not hasattr(obj, '_cached_heygen_info'):
+            obj._cached_heygen_info = self._fetch_and_update_info(obj)
+        return obj._cached_heygen_info
+
+    def _fetch_and_update_info(self, obj):
         avatar_id = getattr(obj, 'heygen_avatar_id', None)
         request = self.context.get('request')
 
@@ -66,7 +71,13 @@ class AvatarList(serializers.ModelSerializer):
 
         info = test_ai.fetch_heygen_avatar_info(avatar_id)
         if not info:
-            return None
+            # Fall back to returning current DB data if API call fails
+            return {
+                "avatar_id": avatar_id,
+                "status": "error",
+                "preview_image_url": obj.heygen_preview_url,
+                "image_urls": obj.heygen_image_urls or []
+            }
 
         # Normalize image URLs — make absolute if request available and URL is relative
         normalized = dict(info)
@@ -100,6 +111,21 @@ class AvatarList(serializers.ModelSerializer):
         normalized['persisted_preview_url'] = obj.heygen_preview_url
         normalized['persisted_image_urls'] = obj.heygen_image_urls or []
         return normalized
+
+    def get_heygen_avatar_info(self, obj):
+        return self._get_cached_heygen_info(obj)
+
+    def get_heygen_preview_url(self, obj):
+        info = self._get_cached_heygen_info(obj)
+        if info:
+            return info.get('preview_image_url') or obj.heygen_preview_url
+        return obj.heygen_preview_url
+
+    def get_heygen_image_urls(self, obj):
+        info = self._get_cached_heygen_info(obj)
+        if info:
+            return info.get('image_urls') or obj.heygen_image_urls or []
+        return obj.heygen_image_urls or []
 
 
 class VoiceSampleList(serializers.ModelSerializer):
