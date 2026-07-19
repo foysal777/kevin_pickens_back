@@ -102,7 +102,7 @@ class AvatarList(serializers.ModelSerializer):
         # Persist preview + image urls to DB for faster future reads
         try:
             obj.heygen_preview_url = normalized.get('preview_image_url')
-            obj.heygen_image_urls = norm_urls or None
+            obj.heygen_image_urls = norm_urls
             obj.save(update_fields=['heygen_preview_url', 'heygen_image_urls'])
         except Exception:
             pass
@@ -117,14 +117,14 @@ class AvatarList(serializers.ModelSerializer):
 
     def get_heygen_preview_url(self, obj):
         info = self._get_cached_heygen_info(obj)
-        if info:
-            return info.get('preview_image_url') or obj.heygen_preview_url
+        if info and info.get('preview_image_url'):
+            return info.get('preview_image_url')
         return obj.heygen_preview_url
 
     def get_heygen_image_urls(self, obj):
         info = self._get_cached_heygen_info(obj)
-        if info:
-            return info.get('image_urls') or obj.heygen_image_urls or []
+        if info and info.get('image_urls'):
+            return info.get('image_urls')
         return obj.heygen_image_urls or []
 
 
