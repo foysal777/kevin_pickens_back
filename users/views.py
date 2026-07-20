@@ -433,3 +433,65 @@ class TextToVideoView(generics.CreateAPIView):
                 "hygen_video": video_data,
                 "heygen_video": video_data
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+class VideoStatusView(generics.GenericAPIView):
+    permission_classes = [AllowAny]
+    serializer_class = serializers.GeneratedVideoSerializer
+    queryset = models.GeneratedVideo.objects.all()
+
+    @swagger_auto_schema(
+        operation_id="video_status",
+        operation_description="Check video generation status ('processing', 'completed', 'failed') and get HeyGen video URL using video ID.",
+        manual_parameters=[
+            openapi.Parameter(
+                name="id",
+                in_=openapi.IN_QUERY,
+                type=openapi.TYPE_INTEGER,
+                required=False,
+                description="ID of the generated video"
+            ),
+            openapi.Parameter(
+                name="video_id",
+                in_=openapi.IN_QUERY,
+                type=openapi.TYPE_INTEGER,
+                required=False,
+                description="ID of the generated video (alias for id)"
+            ),
+        ],
+        responses={
+            200: "Video status details",
+            400: "Bad Request (missing video ID)",
+            404: "Video not found"
+        },
+        tags=["Video"]
+    )
+    def get(self, request, id=None, pk=None, *args, **kwargs):
+        v_id = id or pk or request.query_params.get('id') or request.query_params.get('video_id')
+        if not v_id:
+            return Response(
+                {"error": "Video ID is required. Pass ID in URL path (e.g. /api/video-status/1/) or query parameter (e.g. /api/video-status/?id=1)."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        try:
+            video_obj = models.GeneratedVideo.objects.get(id=v_id)
+        except (models.GeneratedVideo.DoesNotExist, ValueError):
+            return Response(
+                {"error": f"Video with ID '{v_id}' not found."},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        video_data = serializers.GeneratedVideoSerializer(video_obj, context={"request": request}).data
+        video_url = video_data.get('video_url') or ""
+
+        return Response({
+            "id": video_obj.id,
+            "status": video_obj.status,
+            "hygen_url": video_url,
+            "heygen_url": video_url,
+            "video_url": video_url,
+            "error_message": video_obj.error_message,
+            "created_at": video_obj.created_at,
+            "video_details": video_data
+        }, status=status.HTTP_200_OK)
