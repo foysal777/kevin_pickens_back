@@ -485,13 +485,21 @@ class VideoStatusView(generics.GenericAPIView):
         video_data = serializers.GeneratedVideoSerializer(video_obj, context={"request": request}).data
         video_url = video_data.get('video_url') or ""
 
+        if video_obj.status == 'completed':
+            message = "Video generated successfully."
+        elif video_obj.status == 'processing':
+            message = "Video is currently processing."
+        else:
+            message = "Video generation failed."
+
         return Response({
+            "message": message,
             "id": video_obj.id,
             "status": video_obj.status,
+            "error_message": video_obj.error_message,
             "hygen_url": video_url,
             "heygen_url": video_url,
             "video_url": video_url,
-            "error_message": video_obj.error_message,
-            "created_at": video_obj.created_at,
-            "video_details": video_data
+            "hygen_video": video_data,
+            "heygen_video": video_data
         }, status=status.HTTP_200_OK)
