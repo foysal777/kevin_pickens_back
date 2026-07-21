@@ -496,3 +496,101 @@ class VideoStatusView(generics.GenericAPIView):
             "hygen_video": video_data,
             "heygen_video": video_data
         }, status=status.HTTP_200_OK)
+
+
+class DeleteAvatarView(generics.GenericAPIView):
+    permission_classes = [AllowAny]
+    queryset = models.Avatar.objects.all()
+
+    @swagger_auto_schema(
+        operation_id="delete_avatar",
+        operation_description="Delete an avatar by ID.",
+        manual_parameters=[
+            openapi.Parameter(
+                name="id",
+                in_=openapi.IN_QUERY,
+                type=openapi.TYPE_INTEGER,
+                required=False,
+                description="ID of the avatar to delete"
+            ),
+        ],
+        responses={
+            200: "Avatar deleted successfully",
+            400: "Bad Request (missing avatar ID)",
+            404: "Avatar not found"
+        },
+        tags=["Avatar"]
+    )
+    def delete(self, request, id=None, pk=None, *args, **kwargs):
+        avatar_id = id or pk or request.query_params.get('id') or request.query_params.get('avatar_id') or (request.data.get('id') if isinstance(request.data, dict) else None)
+        if not avatar_id:
+            return Response(
+                {"error": "Avatar ID is required. Pass ID in URL path (e.g. /api/delete-avatar/1/) or query parameter (e.g. /api/delete-avatar/?id=1)."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        try:
+            avatar_obj = models.Avatar.objects.get(id=avatar_id)
+        except (models.Avatar.DoesNotExist, ValueError):
+            return Response(
+                {"error": f"Avatar with ID '{avatar_id}' not found."},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        try:
+            if avatar_obj.avatar:
+                avatar_obj.avatar.delete(save=False)
+        except Exception as e:
+            print(f"[delete-avatar] Error deleting avatar file: {e}")
+
+        avatar_obj.delete()
+        return Response(
+            {"message": "Avatar deleted successfully.", "id": int(avatar_id)},
+            status=status.HTTP_200_OK
+        )
+
+
+class DeleteVideoView(generics.GenericAPIView):
+    permission_classes = [AllowAny]
+    queryset = models.GeneratedVideo.objects.all()
+
+    @swagger_auto_schema(
+        operation_id="delete_video",
+        operation_description="Delete a generated video by ID.",
+        manual_parameters=[
+            openapi.Parameter(
+                name="id",
+                in_=openapi.IN_QUERY,
+                type=openapi.TYPE_INTEGER,
+                required=False,
+                description="ID of the video to delete"
+            ),
+        ],
+        responses={
+            200: "Video deleted successfully",
+            400: "Bad Request (missing video ID)",
+            404: "Video not found"
+        },
+        tags=["Video"]
+    )
+    def delete(self, request, id=None, pk=None, *args, **kwargs):
+        video_id = id or pk or request.query_params.get('id') or request.query_params.get('video_id') or (request.data.get('id') if isinstance(request.data, dict) else None)
+        if not video_id:
+            return Response(
+                {"error": "Video ID is required. Pass ID in URL path (e.g. /api/delete-video/1/) or query parameter (e.g. /api/delete-video/?id=1)."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        try:
+            video_obj = models.GeneratedVideo.objects.get(id=video_id)
+        except (models.GeneratedVideo.DoesNotExist, ValueError):
+            return Response(
+                {"error": f"Video with ID '{video_id}' not found."},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        video_obj.delete()
+        return Response(
+            {"message": "Video deleted successfully.", "id": int(video_id)},
+            status=status.HTTP_200_OK
+        )
