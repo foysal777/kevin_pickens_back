@@ -29,7 +29,7 @@ except ImportError:
             return func
         return decorator
 
-
+#hello
 
 def _build_absolute_video_url(request, video_url: str) -> str:
     if not video_url:
@@ -330,35 +330,32 @@ class GenerateVideoView(generics.CreateAPIView):
             status='processing'
         )
 
-        # Trigger task synchronously (blocking request until video is generated)
-        tasks.generate_video_task(
-            generated.id,
-            avatar_input_path,
-            voice_sample_path,
-            cartoon_style=cartoon_style
-        )
+        # Trigger task asynchronously (non-blocking, background execution)
+        try:
+            tasks.generate_video_task.delay(
+                generated.id,
+                avatar_input_path,
+                voice_sample_path,
+                cartoon_style=cartoon_style
+            )
+        except Exception:
+            import threading
+            threading.Thread(
+                target=tasks.generate_video_task,
+                args=(generated.id, avatar_input_path, voice_sample_path),
+                kwargs={"cartoon_style": cartoon_style}
+            ).start()
 
-        # Refresh from database to get the generated video URL
-        generated.refresh_from_db()
         video_data = serializers.GeneratedVideoSerializer(generated, context={"request": request}).data
 
-        if generated.status == 'completed':
-            return Response({
-                "message": "Video generated successfully.",
-                "id": generated.id,
-                "status": "completed",
-                "hygen_video": video_data,
-                "heygen_video": video_data
-            }, status=status.HTTP_201_CREATED)
-        else:
-            return Response({
-                "message": "Video generation failed.",
-                "id": generated.id,
-                "status": generated.status,
-                "error_message": generated.error_message,
-                "hygen_video": video_data,
-                "heygen_video": video_data
-            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        return Response({
+            "message": "Video generation request accepted and is processing.",
+            "id": generated.id,
+            "status": "processing",
+            "hygen_video": video_data,
+            "heygen_video": video_data
+        }, status=status.HTTP_202_ACCEPTED)
+
 
 
 
@@ -403,36 +400,32 @@ class TextToVideoView(generics.CreateAPIView):
             status='processing'
         )
 
-        # Trigger Celery task synchronously (blocking request until video is generated)
-        tasks.text_to_video_task(
-            generated.id,
-            text,
-            avatar_id,
-            is_cartoon,
-            voice_id
-        )
+        # Trigger task asynchronously (non-blocking, background execution)
+        try:
+            tasks.text_to_video_task.delay(
+                generated.id,
+                text,
+                avatar_id,
+                is_cartoon,
+                voice_id
+            )
+        except Exception:
+            import threading
+            threading.Thread(
+                target=tasks.text_to_video_task,
+                args=(generated.id, text, avatar_id, is_cartoon, voice_id)
+            ).start()
 
-        # Refresh from database to get the generated video URL
-        generated.refresh_from_db()
         video_data = serializers.GeneratedVideoSerializer(generated, context={"request": request}).data
 
-        if generated.status == 'completed':
-            return Response({
-                "message": "Video generated successfully.",
-                "id": generated.id,
-                "status": "completed",
-                "hygen_video": video_data,
-                "heygen_video": video_data
-            }, status=status.HTTP_201_CREATED)
-        else:
-            return Response({
-                "message": "Video generation failed.",
-                "id": generated.id,
-                "status": generated.status,
-                "error_message": generated.error_message,
-                "hygen_video": video_data,
-                "heygen_video": video_data
-            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        return Response({
+            "message": "Video generation request accepted and is processing.",
+            "id": generated.id,
+            "status": "processing",
+            "hygen_video": video_data,
+            "heygen_video": video_data
+        }, status=status.HTTP_202_ACCEPTED)
+
 
 
 class VideoStatusView(generics.GenericAPIView):
