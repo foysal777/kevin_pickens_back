@@ -6,11 +6,38 @@ from datetime import datetime, timezone
 from pathlib import Path
 from django.conf import settings
 
+
+def ensure_https(url: str) -> str:
+    if not url:
+        return url
+    s_url = str(url).strip().strip('"').strip("'")
+    if s_url.startswith("http://"):
+        return "https://" + s_url[7:]
+    return s_url
+
+
+def build_absolute_https_uri(request, url: str) -> str:
+    if not url:
+        return url
+    s_url = str(url).strip().strip('"').strip("'")
+    if request and not (s_url.startswith("http://") or s_url.startswith("https://")):
+        s_url = request.build_absolute_uri(s_url)
+    return ensure_https(s_url)
+
+
 class UserSerializer(serializers.ModelSerializer):
+    profile_picture = serializers.SerializerMethodField()
+
     class Meta:
         model = models.User
         fields = ['id', 'email', 'full_name', 'profile_picture', 'phone_number', 'date_of_birth']
 
+    def get_profile_picture(self, obj):
+        if not obj.profile_picture:
+            return None
+        request = self.context.get('request')
+        url = (obj.profile_picture.url or "").strip().strip('"').strip("'")
+        return build_absolute_https_uri(request, url)
 
 
 class AvatarList(serializers.ModelSerializer):
@@ -34,11 +61,8 @@ class AvatarList(serializers.ModelSerializer):
         request = self.context.get('request')
         if not obj.avatar:
             return None
-        # Ensure there are no stray surrounding quotes or whitespace
         url = (obj.avatar.url or "").strip().strip('"').strip("'")
-        if request:
-            return request.build_absolute_uri(url)
-        return url
+        return build_absolute_https_uri(request, url)
 
     def _get_cached_heygen_info(self, obj):
         if not hasattr(obj, '_cached_heygen_info'):
@@ -78,14 +102,16 @@ class AvatarList(serializers.ModelSerializer):
         info = test_ai.fetch_heygen_avatar_info(avatar_id)
         if not info:
             # Fall back to returning current DB data if API call fails
+            prev = ensure_https(obj.heygen_preview_url) if obj.heygen_preview_url else None
+            imgs = [ensure_https(u) for u in (obj.heygen_image_urls or []) if u]
             return {
                 "avatar_id": avatar_id,
                 "status": "error",
-                "preview_image_url": obj.heygen_preview_url,
-                "image_urls": obj.heygen_image_urls or []
+                "preview_image_url": prev,
+                "image_urls": imgs
             }
 
-        # Normalize image URLs — make absolute if request available and URL is relative
+        # Normalize image URLs — make absolute if request available and URL is relative, enforce https
         normalized = dict(info)
         avatar_status = normalized.get('status', '')
         img_list = normalized.get('image_urls') or []
@@ -93,24 +119,19 @@ class AvatarList(serializers.ModelSerializer):
         for u in img_list:
             if not u:
                 continue
-            u = u.strip()
-            if request and not (u.startswith('http://') or u.startswith('https://')):
-                u = request.build_absolute_uri(u)
+            u = build_absolute_https_uri(request, u)
             norm_urls.append(u)
         # also normalize preview
         preview = normalized.get('preview_image_url')
         if preview:
-            p = preview.strip()
-            if request and not (p.startswith('http://') or p.startswith('https://')):
-                p = request.build_absolute_uri(p)
-            normalized['preview_image_url'] = p
+            normalized['preview_image_url'] = build_absolute_https_uri(request, preview)
 
         normalized['image_urls'] = norm_urls
 
         # Only persist to DB when avatar is ready (not still processing).
         # Saving empty values during "processing" would permanently null out the fields.
         is_ready = avatar_status in ('completed', 'active')
-        if is_ready and (norm_urls or preview):
+        if is_ready and (norm_urls or normalized.get('preview_image_url')):
             try:
                 obj.heygen_preview_url = normalized.get('preview_image_url')
                 obj.heygen_image_urls = norm_urls
@@ -121,13 +142,13 @@ class AvatarList(serializers.ModelSerializer):
             # Fall back to previously persisted values so the response still
             # returns whatever was cached from a prior successful fetch.
             if not norm_urls and obj.heygen_image_urls:
-                normalized['image_urls'] = obj.heygen_image_urls
+                normalized['image_urls'] = [ensure_https(u) for u in obj.heygen_image_urls if u]
             if not normalized.get('preview_image_url') and obj.heygen_preview_url:
-                normalized['preview_image_url'] = obj.heygen_preview_url
+                normalized['preview_image_url'] = ensure_https(obj.heygen_preview_url)
 
         # Also expose the persisted fields at top-level for serializer convenience
-        normalized['persisted_preview_url'] = obj.heygen_preview_url
-        normalized['persisted_image_urls'] = obj.heygen_image_urls or []
+        normalized['persisted_preview_url'] = ensure_https(obj.heygen_preview_url) if obj.heygen_preview_url else None
+        normalized['persisted_image_urls'] = [ensure_https(u) for u in (obj.heygen_image_urls or []) if u]
         return normalized
 
     def get_heygen_avatar_info(self, obj):
@@ -136,14 +157,15 @@ class AvatarList(serializers.ModelSerializer):
     def get_heygen_preview_url(self, obj):
         info = self._get_cached_heygen_info(obj)
         if info and info.get('preview_image_url'):
-            return info.get('preview_image_url')
-        return obj.heygen_preview_url
+            return ensure_https(info.get('preview_image_url'))
+        return ensure_https(obj.heygen_preview_url) if obj.heygen_preview_url else None
 
     def get_heygen_image_urls(self, obj):
         info = self._get_cached_heygen_info(obj)
         if info and info.get('image_urls'):
-            return info.get('image_urls')
-        return obj.heygen_image_urls or []
+            return [ensure_https(u) for u in info.get('image_urls') if u]
+        urls = obj.heygen_image_urls or []
+        return [ensure_https(u) for u in urls if u]
 
     def get_heygen_generated_image(self, obj):
         """Return the locally generated cartoon avatar image as an absolute URL.
@@ -155,33 +177,42 @@ class AvatarList(serializers.ModelSerializer):
 
         # 1. Use HeyGen CDN preview URL if already available
         if obj.heygen_preview_url:
-            return obj.heygen_preview_url
+            return ensure_https(obj.heygen_preview_url)
 
         # 2. Use first URL from persisted heygen_image_urls list
         if obj.heygen_image_urls:
             urls = obj.heygen_image_urls if isinstance(obj.heygen_image_urls, list) else []
-            if urls:
-                return urls[0]
+            if urls and urls[0]:
+                return ensure_https(urls[0])
 
         # 3. Fall back to the locally saved avatar image (cartoon converted by PIL)
         if obj.avatar:
             url = (obj.avatar.url or '').strip().strip('"').strip("'")
             if url:
-                if request:
-                    return request.build_absolute_uri(url)
-                return url
+                return build_absolute_https_uri(request, url)
 
         return None
 
 
 class VoiceSampleList(serializers.ModelSerializer):
+    voice_sample = serializers.SerializerMethodField()
+
     class Meta:
         model = models.VoiceSample
         fields = ['id', 'voice_sample', 'created_at']
 
+    def get_voice_sample(self, obj):
+        if not obj.voice_sample:
+            return None
+        request = self.context.get('request')
+        url = (obj.voice_sample.url or '').strip().strip('"').strip("'")
+        return build_absolute_https_uri(request, url)
+
+
 class UploadAvatarSerializer(serializers.Serializer):
     avatar = serializers.ImageField(required=True, help_text="Image file to upload")
     is_cartoon = serializers.BooleanField(required=False, default=False, help_text="If true, treat uploaded image as cartoon (skips local cartoonisation)")
+
 
 class UploadAvatarAndVoiceSerializer(serializers.Serializer):
     avatar_id = serializers.IntegerField(required=False)
@@ -252,7 +283,7 @@ def get_or_fix_video_url(video_url: str, created_at=None) -> str:
                 if not dest_path.exists():
                     shutil.copy2(local_file, dest_path)
                 return f"{settings.MEDIA_URL}generated_videos/{local_file.name}"
-        return video_url
+        return ensure_https(video_url)
 
     # 2. Absolute local path (e.g. /home/foysal_munna/...)
     if video_url.startswith("/"):
@@ -295,10 +326,8 @@ class GeneratedVideoSerializer(serializers.ModelSerializer):
                 
         request = self.context.get('request')
         if fixed_url.startswith(settings.MEDIA_URL):
-            if request:
-                return request.build_absolute_uri(fixed_url)
-            return fixed_url
-        return fixed_url
+            return build_absolute_https_uri(request, fixed_url)
+        return ensure_https(fixed_url)
 
 
 class TextToVideoSerializer(serializers.Serializer):
@@ -306,4 +335,3 @@ class TextToVideoSerializer(serializers.Serializer):
     avatar_id = serializers.IntegerField(required=False, allow_null=True)
     is_cartoon = serializers.BooleanField(required=False, default=False)
     voice_id = serializers.CharField(required=False, allow_null=True, allow_blank=True)
-

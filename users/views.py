@@ -35,11 +35,11 @@ def _build_absolute_video_url(request, video_url: str) -> str:
     if not video_url:
         return video_url
     if video_url.startswith("http://") or video_url.startswith("https://"):
-        return video_url
+        return serializers.ensure_https(video_url)
     if video_url.startswith("/"):
-        return request.build_absolute_uri(video_url)
+        return serializers.build_absolute_https_uri(request, video_url)
     base = request.build_absolute_uri("/").rstrip("/")
-    return f"{base}/api{video_url}"
+    return serializers.ensure_https(f"{base}/api{video_url}")
 
 
 def _save_uploaded_file_temp(uploaded_file, prefix="file") -> str:
@@ -220,9 +220,9 @@ class UploadAvatarView(generics.CreateAPIView):
         # If serializer returned empty urls but we have data from heygen_info, patch them in
         if heygen_info:
             if not data.get("heygen_image_urls") and heygen_info.get("image_urls"):
-                data["heygen_image_urls"] = heygen_info["image_urls"]
+                data["heygen_image_urls"] = [serializers.ensure_https(u) for u in heygen_info["image_urls"] if u]
             if not data.get("heygen_preview_url") and heygen_info.get("preview_image_url"):
-                data["heygen_preview_url"] = heygen_info["preview_image_url"]
+                data["heygen_preview_url"] = serializers.ensure_https(heygen_info["preview_image_url"])
             if not data.get("heygen_avatar_info"):
                 data["heygen_avatar_info"] = heygen_info
 
@@ -234,7 +234,7 @@ class UploadAvatarView(generics.CreateAPIView):
                 or (data.get("heygen_image_urls") or [None])[0]
                 or data.get("avatar")
             )
-            data["heygen_generated_image"] = generated_img
+            data["heygen_generated_image"] = serializers.ensure_https(generated_img)
 
         return Response(data, status=status.HTTP_201_CREATED)
 
@@ -476,7 +476,7 @@ class VideoStatusView(generics.GenericAPIView):
             )
 
         video_data = serializers.GeneratedVideoSerializer(video_obj, context={"request": request}).data
-        video_url = video_data.get('video_url') or ""
+        video_url = serializers.ensure_https(video_data.get('video_url') or "")
 
         if video_obj.status == 'completed':
             message = "Video generated successfully."
