@@ -32,18 +32,30 @@ def ensure_background_image(path: Path | None = None) -> Path:
         from PIL import Image, ImageDraw, ImageFont
 
         width, height = 1280, 720
-        img = Image.new("RGB", (width, height), "#0b1020")
+        img = Image.new("RGB", (width, height), "#07111f")
         draw = ImageDraw.Draw(img)
 
         for y in range(height):
             ratio = y / max(height - 1, 1)
-            r = int(11 + ratio * 28)
-            g = int(16 + ratio * 35)
-            b = int(32 + ratio * 50)
+            r = int(7 + ratio * 36)
+            g = int(17 + ratio * 38)
+            b = int(35 + ratio * 55)
             draw.line([(0, y), (width, y)], fill=(r, g, b))
 
+        # Add a soft spotlight and rounded panel for better readability
+        spotlight = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+        spotlight_draw = ImageDraw.Draw(spotlight)
+        spotlight_draw.ellipse((120, 80, width - 120, height - 80), fill=(255, 255, 255, 24))
+        img = Image.alpha_composite(img.convert("RGBA"), spotlight).convert("RGB")
+        draw = ImageDraw.Draw(img)
+
+        panel_x1, panel_y1 = 90, 210
+        panel_x2, panel_y2 = width - 90, 360
+        draw.rounded_rectangle((panel_x1, panel_y1, panel_x2, panel_y2), radius=32, fill=(0, 0, 0, 180))
+        draw.rounded_rectangle((panel_x1 - 2, panel_y1 - 2, panel_x2 + 2, panel_y2 + 2), radius=34, outline=(255, 255, 255, 70), width=3)
+
         try:
-            font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 56)
+            font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 58)
         except Exception:
             font = ImageFont.load_default()
 
@@ -51,8 +63,12 @@ def ensure_background_image(path: Path | None = None) -> Path:
         text_w = bbox[2] - bbox[0]
         text_h = bbox[3] - bbox[1]
         x = (width - text_w) // 2
-        y = (height - text_h) // 2
-        draw.text((x, y), BACKGROUND_TEXT, fill="#f8fafc", font=font)
+        y = 240
+
+        shadow_color = (0, 0, 0, 180)
+        draw.text((x + 3, y + 3), BACKGROUND_TEXT, fill=shadow_color, font=font)
+        draw.text((x, y), BACKGROUND_TEXT, fill="#fef3c7", font=font)
+
         img.save(bg_path, format="PNG")
     except Exception:
         bg_path.write_bytes(b"")
