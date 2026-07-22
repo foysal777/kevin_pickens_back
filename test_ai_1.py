@@ -14,8 +14,47 @@ ELEVENLABS_BASE = "https://api.elevenlabs.io/v1"
 HEYGEN_BASE     = "https://api.heygen.com"
 
 # Fixed background — same for EVERY video
-#FIXED_BACKGROUND_URL = "https://images.unsplash.com/photo-1514306191717-452ec28c7814?w=1280"
-FIXED_BACKGROUND_URL = r"/home/foysal_munna/Foysal_Munna/Backend Code/kelvin_pickens/KevinBB/bg.jpg"
+PROJECT_ROOT = Path(__file__).resolve().parent
+DEFAULT_BACKGROUND_PATH = PROJECT_ROOT / "new_bg.png"
+BACKGROUND_TEXT = "Trufit Da Comedian"
+
+
+def ensure_background_image(path: Path | None = None) -> Path:
+    bg_path = (path or DEFAULT_BACKGROUND_PATH).resolve()
+    bg_path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        from PIL import Image, ImageDraw, ImageFont
+
+        width, height = 1280, 720
+        img = Image.new("RGB", (width, height), "#0b1020")
+        draw = ImageDraw.Draw(img)
+
+        for y in range(height):
+            ratio = y / max(height - 1, 1)
+            r = int(11 + ratio * 28)
+            g = int(16 + ratio * 35)
+            b = int(32 + ratio * 50)
+            draw.line([(0, y), (width, y)], fill=(r, g, b))
+
+        try:
+            font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 56)
+        except Exception:
+            font = ImageFont.load_default()
+
+        bbox = draw.textbbox((0, 0), BACKGROUND_TEXT, font=font)
+        text_w = bbox[2] - bbox[0]
+        text_h = bbox[3] - bbox[1]
+        x = (width - text_w) // 2
+        y = (height - text_h) // 2
+        draw.text((x, y), BACKGROUND_TEXT, fill="#f8fafc", font=font)
+        img.save(bg_path, format="PNG")
+    except Exception:
+        bg_path.write_bytes(b"")
+
+    return bg_path
+
+
+FIXED_BACKGROUND_URL = str(ensure_background_image(DEFAULT_BACKGROUND_PATH))
 
 OUTPUT_DIR = Path("test_output")
 OUTPUT_DIR.mkdir(exist_ok=True)

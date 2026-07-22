@@ -21,7 +21,46 @@ HEYGEN_BASE     = "https://api.heygen.com"
 
 # Fixed background — same for EVERY video
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-FIXED_BACKGROUND_URL = str(PROJECT_ROOT / "bg.jpg")
+DEFAULT_BACKGROUND_PATH = PROJECT_ROOT / "new_bg.png"
+BACKGROUND_TEXT = "Trufit Da Comedian"
+
+
+def ensure_background_image(path: Path | None = None) -> Path:
+    bg_path = (path or DEFAULT_BACKGROUND_PATH).resolve()
+    bg_path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        from PIL import Image, ImageDraw, ImageFont
+
+        width, height = 1280, 720
+        img = Image.new("RGB", (width, height), "#0b1020")
+        draw = ImageDraw.Draw(img)
+
+        for y in range(height):
+            ratio = y / max(height - 1, 1)
+            r = int(11 + ratio * 28)
+            g = int(16 + ratio * 35)
+            b = int(32 + ratio * 50)
+            draw.line([(0, y), (width, y)], fill=(r, g, b))
+
+        try:
+            font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 56)
+        except Exception:
+            font = ImageFont.load_default()
+
+        bbox = draw.textbbox((0, 0), BACKGROUND_TEXT, font=font)
+        text_w = bbox[2] - bbox[0]
+        text_h = bbox[3] - bbox[1]
+        x = (width - text_w) // 2
+        y = (height - text_h) // 2
+        draw.text((x, y), BACKGROUND_TEXT, fill="#f8fafc", font=font)
+        img.save(bg_path, format="PNG")
+    except Exception:
+        bg_path.write_bytes(b"")
+
+    return bg_path
+
+
+FIXED_BACKGROUND_URL = str(ensure_background_image(DEFAULT_BACKGROUND_PATH))
 
 try:
     from django.conf import settings
@@ -1062,15 +1101,68 @@ def _convert_to_mp3(audio_path: Path) -> Path:
         return audio_path
 
 
+def _get_cached_asset_id(asset_type: str, file_path: Path) -> str | None:
+    if not file_path or not file_path.exists():
+        return None
+
+    try:
+        import hashlib
+        from django.conf import settings as django_settings
+    except Exception:
+        django_settings = None
+
+    try:
+        file_hash = hashlib.md5(file_path.read_bytes()).hexdigest()
+        media_root = getattr(django_settings, "MEDIA_ROOT", None) if django_settings else None
+        cache_file = Path(media_root) / f"{asset_type}_asset_cache.json" if media_root else Path("media") / f"{asset_type}_asset_cache.json"
+        cache_file.parent.mkdir(parents=True, exist_ok=True)
+        if cache_file.exists():
+            data = json.loads(cache_file.read_text())
+            if data.get("hash") == file_hash and data.get("asset_id"):
+                return data["asset_id"]
+    except Exception:
+        return None
+
+    return None
+
+
+def _cache_asset_id(asset_type: str, file_path: Path, asset_id: str) -> None:
+    if not asset_id or not file_path or not file_path.exists():
+        return
+
+    try:
+        import hashlib
+        from django.conf import settings as django_settings
+    except Exception:
+        django_settings = None
+
+    try:
+        file_hash = hashlib.md5(file_path.read_bytes()).hexdigest()
+        media_root = getattr(django_settings, "MEDIA_ROOT", None) if django_settings else None
+        cache_file = Path(media_root) / f"{asset_type}_asset_cache.json" if media_root else Path("media") / f"{asset_type}_asset_cache.json"
+        cache_file.parent.mkdir(parents=True, exist_ok=True)
+        cache_file.write_text(json.dumps({"hash": file_hash, "asset_id": asset_id}))
+    except Exception:
+        pass
+
+
 def _upload_audio_to_heygen(audio_path: Path) -> str | None:
     # HeyGen only accepts true audio assets — m4a gets flagged as video/mp4
     # Convert to mp3 first to guarantee acceptance
     audio_path = _convert_to_mp3(audio_path)
 
+    cached_asset_id = _get_cached_asset_id("audio", audio_path)
+    if cached_asset_id:
+        ok(f"Reusing cached audio asset_id: {cached_asset_id}")
+        SUMMARY["audio"]["heygen_asset_id"] = cached_asset_id
+        SUMMARY["audio"]["uploaded_file"]   = str(audio_path)
+        return cached_asset_id
+
     step("📤", f"Uploading {audio_path.name} to HeyGen asset store…")
     # Always upload as audio/mpeg (mp3) — safest format HeyGen accepts
     asset_id = _upload_asset(str(audio_path), "audio/mpeg")
     if asset_id:
+        _cache_asset_id("audio", audio_path, asset_id)
         ok(f"Audio asset_id: {asset_id}")
         SUMMARY["audio"]["heygen_asset_id"] = asset_id
         SUMMARY["audio"]["uploaded_file"]   = str(audio_path)
@@ -1188,9 +1280,24 @@ def _generate_local_video(avatar: dict, audio_path: Path | None) -> str | None:
     ok(f"Creating local video from image → {image_path} and audio → {audio_path}")
 
     try:
+        from PIL import Image
         import subprocess
+
+        bg_path = ensure_background_image(DEFAULT_BACKGROUND_PATH)
+        bg_image = Image.open(bg_path).convert("RGBA")
+        avatar_image = Image.open(image_path).convert("RGBA")
+        avatar_width = int(bg_image.width * 0.28)
+        avatar_height = int(avatar_width * avatar_image.height / max(avatar_image.width, 1))
+        avatar_image = avatar_image.resize((avatar_width, avatar_height), Image.LANCZOS)
+        x = (bg_image.width - avatar_image.width) // 2
+        y = bg_image.height - avatar_image.height - 80
+        composite_path = OUTPUT_DIR / f"composite_{ts}.png"
+        bg_image_copy = bg_image.copy()
+        bg_image_copy.paste(avatar_image, (x, y), avatar_image)
+        bg_image_copy.save(composite_path, format="PNG")
+
         cmd = [
-            "ffmpeg", "-y", "-loop", "1", "-i", str(image_path),
+            "ffmpeg", "-y", "-loop", "1", "-i", str(composite_path),
             "-i", str(audio_path), "-c:v", "libx264", "-preset", "medium",
             "-pix_fmt", "yuv420p", "-shortest", str(out)
         ]
