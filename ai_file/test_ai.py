@@ -19,9 +19,9 @@ print(f"  HEYGEN_API_KEY={HEYGEN_API_KEY}")
 ELEVENLABS_BASE = "https://api.elevenlabs.io/v1"
 HEYGEN_BASE     = "https://api.heygen.com"
 
-# Fixed background — same for EVERY video
+# Fixed background — professional red stage curtain for EVERY video
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-DEFAULT_BACKGROUND_PATH = PROJECT_ROOT / "stage.jpg"
+DEFAULT_BACKGROUND_PATH = PROJECT_ROOT / "red_stage_curtain.jpg"
 BACKGROUND_TEXT = "Trufit Da Comedian"
 
 
@@ -30,53 +30,81 @@ def ensure_background_image(path: Path | None = None) -> Path:
     if bg_path.exists() and bg_path.stat().st_size > 0:
         return bg_path
 
-    stage_file = PROJECT_ROOT / "stage.jpg"
-    if stage_file.exists() and stage_file.stat().st_size > 0:
-        return stage_file.resolve()
-
     bg_path.parent.mkdir(parents=True, exist_ok=True)
     try:
+        import math
         from PIL import Image, ImageDraw, ImageFont
 
         width, height = 1280, 720
-        img = Image.new("RGB", (width, height), "#07111f")
+        img = Image.new("RGBA", (width, height), (20, 0, 5, 255))
         draw = ImageDraw.Draw(img)
 
-        for y in range(height):
-            ratio = y / max(height - 1, 1)
-            r = int(7 + ratio * 36)
-            g = int(17 + ratio * 38)
-            b = int(35 + ratio * 55)
-            draw.line([(0, y), (width, y)], fill=(r, g, b))
+        # 1. Red curtain folds (vertical 3D velvet sine wave folds)
+        for x in range(width):
+            fold = (math.sin(x * 0.045) + 1) / 2.0
+            fold2 = (math.sin(x * 0.015) + 1) / 2.0
+            intensity = 0.4 * fold + 0.6 * fold2
+            for y in range(height):
+                v_grad = 1.0 - (y / height) * 0.35
+                r = int((140 + 105 * intensity) * v_grad)
+                g = int((5 + 25 * intensity) * v_grad)
+                b = int((15 + 30 * intensity) * v_grad)
+                draw.point((x, y), fill=(r, g, b, 255))
 
-        # Add a soft spotlight and rounded panel for better readability
+        # 2. Stage floor at bottom
+        floor_h = 160
+        floor_y = height - floor_h
+        for y in range(floor_y, height):
+            ratio = (y - floor_y) / floor_h
+            r = int(35 + ratio * 40)
+            g = int(12 + ratio * 15)
+            b = int(8 + ratio * 10)
+            draw.line([(0, y), (width, y)], fill=(r, g, b, 255))
+
+        # Gold trim edge on stage floor
+        draw.line([(0, floor_y), (width, floor_y)], fill=(212, 160, 23, 200), width=3)
+
+        # 3. Soft warm spotlight beam from top center onto stage
         spotlight = Image.new("RGBA", (width, height), (0, 0, 0, 0))
-        spotlight_draw = ImageDraw.Draw(spotlight)
-        spotlight_draw.ellipse((120, 80, width - 120, height - 80), fill=(255, 255, 255, 24))
-        img = Image.alpha_composite(img.convert("RGBA"), spotlight).convert("RGB")
+        spot_draw = ImageDraw.Draw(spotlight)
+        spot_draw.ellipse((width // 2 - 420, 40, width // 2 + 420, height - 20), fill=(255, 235, 180, 45))
+        spot_draw.ellipse((width // 2 - 260, 80, width // 2 + 260, height - 60), fill=(255, 245, 210, 35))
+        img = Image.alpha_composite(img, spotlight)
         draw = ImageDraw.Draw(img)
 
-        panel_x1, panel_y1 = 90, 210
-        panel_x2, panel_y2 = width - 90, 360
-        draw.rounded_rectangle((panel_x1, panel_y1, panel_x2, panel_y2), radius=32, fill=(0, 0, 0, 180))
-        draw.rounded_rectangle((panel_x1 - 2, panel_y1 - 2, panel_x2 + 2, panel_y2 + 2), radius=34, outline=(255, 255, 255, 70), width=3)
+        # 4. Top curtain valance swag header
+        for x in range(width):
+            swag = int(25 * math.sin(x * 0.015))
+            swag_y = 50 + swag
+            for y in range(swag_y):
+                draw.point((x, y), fill=(100, 5, 15, 255))
 
+        draw.line([(0, 50), (width, 50)], fill=(212, 175, 55, 255), width=4)
+
+        # 5. Marquee Sign for 'Trufit Da Comedian'
         try:
-            font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 58)
+            font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 46)
         except Exception:
             font = ImageFont.load_default()
 
         bbox = draw.textbbox((0, 0), BACKGROUND_TEXT, font=font)
-        text_w = bbox[2] - bbox[0]
-        text_h = bbox[3] - bbox[1]
-        x = (width - text_w) // 2
-        y = 240
+        tw, th = bbox[2] - bbox[0], bbox[3] - bbox[1]
 
-        shadow_color = (0, 0, 0, 180)
-        draw.text((x + 3, y + 3), BACKGROUND_TEXT, fill=shadow_color, font=font)
-        draw.text((x, y), BACKGROUND_TEXT, fill="#fef3c7", font=font)
+        px1, py1 = (width - tw) // 2 - 40, 95
+        px2, py2 = (width + tw) // 2 + 40, 95 + th + 35
 
-        img.save(bg_path, format="JPEG" if bg_path.suffix.lower() in [".jpg", ".jpeg"] else "PNG")
+        # Glowing marquee plate background (dark ruby with gold outline)
+        draw.rounded_rectangle((px1, py1, px2, py2), radius=18, fill=(35, 5, 10, 220), outline=(230, 180, 50, 255), width=4)
+        draw.rounded_rectangle((px1 - 3, py1 - 3, px2 + 3, py2 + 3), radius=21, fill=None, outline=(255, 225, 120, 180), width=2)
+
+        # Text shadow and gold text
+        tx = (width - tw) // 2
+        ty = py1 + (py2 - py1 - th) // 2 - 2
+
+        draw.text((tx + 3, ty + 3), BACKGROUND_TEXT, fill=(10, 0, 0, 220), font=font)
+        draw.text((tx, ty), BACKGROUND_TEXT, fill="#FFD700", font=font)
+
+        img.convert("RGB").save(bg_path, format="JPEG" if bg_path.suffix.lower() in [".jpg", ".jpeg"] else "PNG", quality=95)
     except Exception:
         bg_path.write_bytes(b"")
 
