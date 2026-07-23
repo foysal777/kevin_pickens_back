@@ -44,7 +44,11 @@ def generate_video_task(self, video_id, avatar_input_path, voice_sample_path, ca
     except Exception as e:
         logger.error(f"Error in generate_video_task for video_id={video_id}: {e}", exc_info=True)
         video_obj.status = 'failed'
-        video_obj.error_message = str(e)
+        err_str = str(e)
+        if any(k in err_str.lower() for k in ["quota", "credit", "payment", "limit", "exhausted"]):
+            video_obj.error_message = "Heygen quota is finished"
+        else:
+            video_obj.error_message = err_str
         video_obj.save(update_fields=['status', 'error_message'])
 
 
@@ -131,5 +135,9 @@ def text_to_video_task(self, video_id, text, avatar_id, is_cartoon, voice_id):
     except Exception as e:
         logger.error(f"Error in text_to_video_task for video_id={video_id}: {e}", exc_info=True)
         video_obj.status = 'failed'
-        video_obj.error_message = str(e)
+        err_str = str(e)
+        if any(k in err_str.lower() for k in ["quota", "credit", "payment", "limit", "exhausted"]):
+            video_obj.error_message = "Heygen quota is finished"
+        else:
+            video_obj.error_message = err_str
         video_obj.save(update_fields=['status', 'error_message'])

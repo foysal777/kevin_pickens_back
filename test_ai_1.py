@@ -172,6 +172,25 @@ def step(n, m): print(f"\n  [{n}] {m}")
 READY_STATUSES = {"completed", "active"}
 
 
+def check_heygen_quota_error(response_or_text) -> str | None:
+    text = ""
+    status_code = None
+    if isinstance(response_or_text, requests.Response):
+        status_code = response_or_text.status_code
+        text = response_or_text.text
+    else:
+        text = str(response_or_text)
+
+    low_text = text.lower()
+    quota_keywords = [
+        "quota", "credit", "payment", "limit", "exhausted",
+        "insufficient", "not enough", "expired", "sub_required", "402", "trial"
+    ]
+    if status_code in (402, 429) or any(k in low_text for k in quota_keywords):
+        return "Heygen quota is finished"
+    return None
+
+
 def heygen_headers(json_body: bool = False) -> dict:
     h = {"X-Api-Key": HEYGEN_API_KEY, "accept": "application/json"}
     if json_body:

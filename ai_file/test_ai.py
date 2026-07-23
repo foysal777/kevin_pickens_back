@@ -169,6 +169,25 @@ def step(n, m): print(f"\n  [{n}] {m}")
 READY_STATUSES = {"completed", "active"}
 
 
+def check_heygen_quota_error(response_or_text) -> str | None:
+    text = ""
+    status_code = None
+    if isinstance(response_or_text, requests.Response):
+        status_code = response_or_text.status_code
+        text = response_or_text.text
+    else:
+        text = str(response_or_text)
+
+    low_text = text.lower()
+    quota_keywords = [
+        "quota", "credit", "payment", "limit", "exhausted",
+        "insufficient", "not enough", "expired", "sub_required", "402", "trial"
+    ]
+    if status_code in (402, 429) or any(k in low_text for k in quota_keywords):
+        return "Heygen quota is finished"
+    return None
+
+
 def heygen_headers(json_body: bool = False) -> dict:
     h = {"X-Api-Key": HEYGEN_API_KEY, "accept": "application/json"}
     if json_body:
@@ -479,6 +498,10 @@ def _upload_asset_with_url(file_path: str, mime: str) -> tuple[str | None, str |
         return None, None
 
     if r.status_code not in (200, 201):
+        q_err = check_heygen_quota_error(r)
+        if q_err:
+            fail(q_err)
+            raise Exception(q_err)
         fail(f"Asset upload HTTP {r.status_code}: {r.text[:400]}")
         return None, None
     try:
@@ -609,6 +632,10 @@ def _create_avatar_from_payload(payload: dict, avatar_name: str, is_cartoon: boo
         d = r.json()
         info(f"Create avatar response:\n{json.dumps(d, indent=4)}")
         if r.status_code not in (200, 201):
+            q_err = check_heygen_quota_error(r)
+            if q_err:
+                fail(q_err)
+                raise Exception(q_err)
             fail(f"Avatar creation failed (HTTP {r.status_code}): {r.text[:400]}")
             return None
 
@@ -1273,6 +1300,10 @@ def generate_video(avatar: dict, audio_asset_id: str, audio_path: Path | None = 
         info(f"Submit response:\n{json.dumps(d, indent=4)}")
 
         if r.status_code not in (200, 201):
+            q_err = check_heygen_quota_error(r)
+            if q_err:
+                fail(q_err)
+                raise Exception(q_err)
             fail(f"Video submit failed (HTTP {r.status_code}):\n{r.text[:600]}")
             return None
 
@@ -1393,6 +1424,12 @@ def _poll_video(video_id: str, max_wait: int = 600) -> str | None:
                     return video_url
                 if status in ("failed", "error"):
                     msg = data.get("failure_message", "no details")
+                    q_err = check_heygen_quota_error(msg)
+                    if q_err:
+                        fail(q_err)
+                        SUMMARY["video"]["status"] = "failed"
+                        SUMMARY["video"]["error"] = q_err
+                        raise Exception(q_err)
                     fail(f"Video failed: {msg}")
                     SUMMARY["video"]["status"] = "failed"
                     SUMMARY["video"]["error"]  = msg

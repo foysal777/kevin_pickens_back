@@ -483,13 +483,16 @@ class VideoStatusView(generics.GenericAPIView):
         elif video_obj.status == 'processing':
             message = "Video is currently processing."
         else:
-            message = "Video generation failed."
+            if video_obj.error_message and any(k in video_obj.error_message.lower() for k in ["quota", "credit", "payment", "limit", "exhausted"]):
+                message = "Heygen quota is finished"
+            else:
+                message = video_obj.error_message or "Video generation failed."
 
         return Response({
             "message": message,
             "id": video_obj.id,
             "status": video_obj.status,
-            "error_message": video_obj.error_message,
+            "error_message": video_obj.error_message or (message if "quota" in message.lower() else None),
             "hygen_url": video_url,
             "heygen_url": video_url,
             "video_url": video_url,
