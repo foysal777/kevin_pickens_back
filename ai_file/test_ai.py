@@ -19,9 +19,10 @@ print(f"  HEYGEN_API_KEY={HEYGEN_API_KEY}")
 ELEVENLABS_BASE = "https://api.elevenlabs.io/v1"
 HEYGEN_BASE     = "https://api.heygen.com"
 
-# Fixed background — professional red stage curtain for EVERY video
+# Fixed background — mobile vertical red stage curtain (9:16 aspect ratio for 360-412px x 800-915px mobile viewport)
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-DEFAULT_BACKGROUND_PATH = PROJECT_ROOT / "red_stage_curtain.jpg"
+DEFAULT_BACKGROUND_PATH = PROJECT_ROOT / "mobile_stage_red.jpg"
+RED_STAGE_SRC = PROJECT_ROOT / "red.jpg"
 BACKGROUND_TEXT = "Trufit Da Comedian"
 
 
@@ -32,81 +33,72 @@ def ensure_background_image(path: Path | None = None) -> Path:
 
     bg_path.parent.mkdir(parents=True, exist_ok=True)
     try:
-        import math
         from PIL import Image, ImageDraw, ImageFont
 
-        width, height = 1280, 720
-        img = Image.new("RGBA", (width, height), (20, 0, 5, 255))
+        target_w, target_h = 720, 1280
+
+        if RED_STAGE_SRC.exists() and RED_STAGE_SRC.stat().st_size > 0:
+            img_orig = Image.open(RED_STAGE_SRC).convert("RGB")
+            w_orig, h_orig = img_orig.size
+            target_aspect = target_w / target_h
+            orig_aspect = w_orig / h_orig
+
+            if orig_aspect > target_aspect:
+                new_w = int(h_orig * target_aspect)
+                left = (w_orig - new_w) // 2
+                crop_box = (left, 0, left + new_w, h_orig)
+            else:
+                new_h = int(w_orig / target_aspect)
+                top = (h_orig - new_h) // 2
+                crop_box = (0, top, w_orig, top + new_h)
+
+            img = img_orig.crop(crop_box).resize((target_w, target_h), Image.LANCZOS)
+        else:
+            import math
+            img = Image.new("RGBA", (target_w, target_h), (20, 0, 5, 255))
+            draw = ImageDraw.Draw(img)
+            for x in range(target_w):
+                fold = (math.sin(x * 0.045) + 1) / 2.0
+                intensity = 0.4 * fold + 0.6
+                for y in range(target_h):
+                    v_grad = 1.0 - (y / target_h) * 0.35
+                    r = int(140 * intensity * v_grad)
+                    g = int(5 * v_grad)
+                    b = int(15 * v_grad)
+                    draw.point((x, y), fill=(r, g, b, 255))
+
+        # Add Marquee Sign for 'Trufit Da Comedian' at top of mobile frame
         draw = ImageDraw.Draw(img)
-
-        # 1. Red curtain folds (vertical 3D velvet sine wave folds)
-        for x in range(width):
-            fold = (math.sin(x * 0.045) + 1) / 2.0
-            fold2 = (math.sin(x * 0.015) + 1) / 2.0
-            intensity = 0.4 * fold + 0.6 * fold2
-            for y in range(height):
-                v_grad = 1.0 - (y / height) * 0.35
-                r = int((140 + 105 * intensity) * v_grad)
-                g = int((5 + 25 * intensity) * v_grad)
-                b = int((15 + 30 * intensity) * v_grad)
-                draw.point((x, y), fill=(r, g, b, 255))
-
-        # 2. Stage floor at bottom
-        floor_h = 160
-        floor_y = height - floor_h
-        for y in range(floor_y, height):
-            ratio = (y - floor_y) / floor_h
-            r = int(35 + ratio * 40)
-            g = int(12 + ratio * 15)
-            b = int(8 + ratio * 10)
-            draw.line([(0, y), (width, y)], fill=(r, g, b, 255))
-
-        # Gold trim edge on stage floor
-        draw.line([(0, floor_y), (width, floor_y)], fill=(212, 160, 23, 200), width=3)
-
-        # 3. Soft warm spotlight beam from top center onto stage
-        spotlight = Image.new("RGBA", (width, height), (0, 0, 0, 0))
-        spot_draw = ImageDraw.Draw(spotlight)
-        spot_draw.ellipse((width // 2 - 420, 40, width // 2 + 420, height - 20), fill=(255, 235, 180, 45))
-        spot_draw.ellipse((width // 2 - 260, 80, width // 2 + 260, height - 60), fill=(255, 245, 210, 35))
-        img = Image.alpha_composite(img, spotlight)
-        draw = ImageDraw.Draw(img)
-
-        # 4. Top curtain valance swag header
-        for x in range(width):
-            swag = int(25 * math.sin(x * 0.015))
-            swag_y = 50 + swag
-            for y in range(swag_y):
-                draw.point((x, y), fill=(100, 5, 15, 255))
-
-        draw.line([(0, 50), (width, 50)], fill=(212, 175, 55, 255), width=4)
-
-        # 5. Marquee Sign for 'Trufit Da Comedian'
         try:
-            font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 46)
+            font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 42)
         except Exception:
             font = ImageFont.load_default()
 
         bbox = draw.textbbox((0, 0), BACKGROUND_TEXT, font=font)
         tw, th = bbox[2] - bbox[0], bbox[3] - bbox[1]
 
-        px1, py1 = (width - tw) // 2 - 40, 95
-        px2, py2 = (width + tw) // 2 + 40, 95 + th + 35
+        px1, py1 = (target_w - tw) // 2 - 30, 140
+        px2, py2 = (target_w + tw) // 2 + 30, 140 + th + 30
 
-        # Glowing marquee plate background (dark ruby with gold outline)
-        draw.rounded_rectangle((px1, py1, px2, py2), radius=18, fill=(35, 5, 10, 220), outline=(230, 180, 50, 255), width=4)
-        draw.rounded_rectangle((px1 - 3, py1 - 3, px2 + 3, py2 + 3), radius=21, fill=None, outline=(255, 225, 120, 180), width=2)
+        plate = Image.new("RGBA", (target_w, target_h), (0, 0, 0, 0))
+        plate_draw = ImageDraw.Draw(plate)
+        plate_draw.rounded_rectangle((px1, py1, px2, py2), radius=16, fill=(30, 5, 10, 220), outline=(230, 180, 50, 255), width=3)
+        plate_draw.rounded_rectangle((px1 - 2, py1 - 2, px2 + 2, py2 + 2), radius=18, fill=None, outline=(255, 225, 120, 180), width=2)
 
-        # Text shadow and gold text
-        tx = (width - tw) // 2
+        img = Image.alpha_composite(img.convert("RGBA"), plate).convert("RGB")
+        draw = ImageDraw.Draw(img)
+
+        tx = (target_w - tw) // 2
         ty = py1 + (py2 - py1 - th) // 2 - 2
 
-        draw.text((tx + 3, ty + 3), BACKGROUND_TEXT, fill=(10, 0, 0, 220), font=font)
+        draw.text((tx + 2, ty + 2), BACKGROUND_TEXT, fill=(10, 0, 0, 220), font=font)
         draw.text((tx, ty), BACKGROUND_TEXT, fill="#FFD700", font=font)
 
-        img.convert("RGB").save(bg_path, format="JPEG" if bg_path.suffix.lower() in [".jpg", ".jpeg"] else "PNG", quality=95)
+        img.save(bg_path, format="JPEG" if bg_path.suffix.lower() in [".jpg", ".jpeg"] else "PNG", quality=95)
     except Exception:
         bg_path.write_bytes(b"")
+
+    return bg_path
 
     return bg_path
 
@@ -1253,13 +1245,19 @@ def generate_video(avatar: dict, audio_asset_id: str, audio_path: Path | None = 
             "type": "image",
             "url":  background_url,
         },
+        "dimension": {
+            "width": 720,
+            "height": 1280,
+        },
+        "scale": 0.8,
+        "offset": {
+            "x": 0.0,
+            "y": 0.15,
+        },
         "resolution":    "720p",
-        "aspect_ratio":  "16:9",
+        "aspect_ratio":  "9:16",             # ← Mobile vertical phone view (360-412px x 800-915px viewport)
         "title":         f"LipSync_{avatar['name']}_{datetime.now().strftime('%H%M%S')}",
         "remove_background": True,   # strip any residual bg from the avatar layer
-        # Optional photo-avatar extras (avatar_iv only):
-        # "motion_prompt":   "nodding gently while speaking",
-        # "expressiveness":  "medium",   # "low" | "medium" | "high"
     }
     info(f"Payload:\n{json.dumps(payload, indent=4)}")
 
@@ -1337,12 +1335,12 @@ def _generate_local_video(avatar: dict, audio_path: Path | None) -> str | None:
         bg_path = ensure_background_image(DEFAULT_BACKGROUND_PATH)
         bg_image = Image.open(bg_path).convert("RGBA")
         avatar_image = Image.open(image_path).convert("RGBA")
-        avatar_width = int(bg_image.width * 0.35)
+        avatar_width = int(bg_image.width * 0.32)
         avatar_height = int(avatar_width * avatar_image.height / max(avatar_image.width, 1))
         avatar_image = avatar_image.resize((avatar_width, avatar_height), Image.LANCZOS)
-        # Position character in the middle of the stage (centered horizontally and vertically)
+        # Position character small in lower-middle of mobile stage frame below title sign
         x = (bg_image.width - avatar_image.width) // 2
-        y = (bg_image.height - avatar_image.height) // 2
+        y = int(bg_image.height * 0.50)
         composite_path = OUTPUT_DIR / f"composite_{ts}.png"
         bg_image_copy = bg_image.copy()
         bg_image_copy.paste(avatar_image, (x, y), avatar_image)
