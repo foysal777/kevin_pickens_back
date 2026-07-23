@@ -839,7 +839,7 @@ def generate_video(avatar: dict, audio_asset_id: str, audio_path: Path | None = 
     # "engine"           ← must match what the avatar look supports
     background_url = resolve_background_input(FIXED_BACKGROUND_URL)
     payload = {
-        "type":           "avatar",           # ← REQUIRED — this was the 400 error cause
+        "type":           "avatar",           # ← REQUIRED discriminator
         "avatar_id":      avatar["avatar_id"],
         "audio_asset_id": audio_asset_id,     # ← your audio drives the lip-sync
         "engine": {
@@ -848,15 +848,6 @@ def generate_video(avatar: dict, audio_asset_id: str, audio_path: Path | None = 
         "background": {
             "type": "image",
             "url":  background_url,
-        },
-        "dimension": {
-            "width": 720,
-            "height": 1280,
-        },
-        "scale": 0.8,
-        "offset": {
-            "x": 0.0,
-            "y": 0.15,
         },
         "resolution":    "720p",
         "aspect_ratio":  "9:16",             # ← Mobile vertical phone view (360-412px x 800-915px viewport)
@@ -877,12 +868,18 @@ def generate_video(avatar: dict, audio_asset_id: str, audio_path: Path | None = 
         info(f"Submit response:\n{json.dumps(d, indent=4)}")
 
         if r.status_code not in (200, 201):
-            fail(f"Video submit failed (HTTP {r.status_code}):\n{r.text[:600]}")
-            return None
+            q_err = check_heygen_quota_error(r)
+            if q_err:
+                fail(q_err)
+                raise Exception(q_err)
+            err_details = r.text[:600]
+            fail(f"Video submit failed (HTTP {r.status_code}):\n{err_details}")
+            raise Exception(f"Video submit failed (HTTP {r.status_code}): {err_details}")
 
         video_id = (d.get("data") or {}).get("video_id") or d.get("video_id", "")
         if not video_id:
-            fail("No video_id in response."); return None
+            fail("No video_id in response.")
+            raise Exception("No video_id returned by HeyGen API.")
 
         ok(f"Video job submitted!  video_id: {video_id}")
         SUMMARY["video"]["video_id"] = video_id
