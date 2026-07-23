@@ -67,23 +67,23 @@ def ensure_background_image(path: Path | None = None) -> Path:
                     b = int(15 * v_grad)
                     draw.point((x, y), fill=(r, g, b, 255))
 
-        # Add Marquee Sign for 'Trufit Da Comedian' at top of mobile frame
+        # Add Marquee Sign for 'Trufit Da Comedian' at very top of mobile frame
         draw = ImageDraw.Draw(img)
         try:
-            font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 42)
+            font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 38)
         except Exception:
             font = ImageFont.load_default()
 
         bbox = draw.textbbox((0, 0), BACKGROUND_TEXT, font=font)
         tw, th = bbox[2] - bbox[0], bbox[3] - bbox[1]
 
-        px1, py1 = (target_w - tw) // 2 - 30, 140
-        px2, py2 = (target_w + tw) // 2 + 30, 140 + th + 30
+        px1, py1 = (target_w - tw) // 2 - 25, 45
+        px2, py2 = (target_w + tw) // 2 + 25, 45 + th + 22
 
         plate = Image.new("RGBA", (target_w, target_h), (0, 0, 0, 0))
         plate_draw = ImageDraw.Draw(plate)
-        plate_draw.rounded_rectangle((px1, py1, px2, py2), radius=16, fill=(30, 5, 10, 220), outline=(230, 180, 50, 255), width=3)
-        plate_draw.rounded_rectangle((px1 - 2, py1 - 2, px2 + 2, py2 + 2), radius=18, fill=None, outline=(255, 225, 120, 180), width=2)
+        plate_draw.rounded_rectangle((px1, py1, px2, py2), radius=14, fill=(30, 5, 10, 230), outline=(230, 180, 50, 255), width=3)
+        plate_draw.rounded_rectangle((px1 - 2, py1 - 2, px2 + 2, py2 + 2), radius=16, fill=None, outline=(255, 225, 120, 180), width=2)
 
         img = Image.alpha_composite(img.convert("RGBA"), plate).convert("RGB")
         draw = ImageDraw.Draw(img)
@@ -97,8 +97,6 @@ def ensure_background_image(path: Path | None = None) -> Path:
         img.save(bg_path, format="JPEG" if bg_path.suffix.lower() in [".jpg", ".jpeg"] else "PNG", quality=95)
     except Exception:
         bg_path.write_bytes(b"")
-
-    return bg_path
 
     return bg_path
 
@@ -1359,12 +1357,12 @@ def _generate_local_video(avatar: dict, audio_path: Path | None) -> str | None:
         bg_path = ensure_background_image(DEFAULT_BACKGROUND_PATH)
         bg_image = Image.open(bg_path).convert("RGBA")
         avatar_image = Image.open(image_path).convert("RGBA")
-        avatar_width = int(bg_image.width * 0.32)
+        avatar_width = int(bg_image.width * 0.22)
         avatar_height = int(avatar_width * avatar_image.height / max(avatar_image.width, 1))
         avatar_image = avatar_image.resize((avatar_width, avatar_height), Image.LANCZOS)
-        # Position character small in lower-middle of mobile stage frame below title sign
+        # Position character small in lower-middle of mobile stage frame below top marquee title sign
         x = (bg_image.width - avatar_image.width) // 2
-        y = int(bg_image.height * 0.50)
+        y = int(bg_image.height * 0.60)
         composite_path = OUTPUT_DIR / f"composite_{ts}.png"
         bg_image_copy = bg_image.copy()
         bg_image_copy.paste(avatar_image, (x, y), avatar_image)
