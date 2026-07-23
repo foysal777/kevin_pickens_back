@@ -384,8 +384,73 @@ def _pick_default_avatar() -> dict:
             "name": av["name"], "preview_url": "", "engine": "avatar_iv"}
 
 
+def _has_transparency(img) -> bool:
+    try:
+        if img.mode == "RGBA":
+            extrema = img.getextrema()
+            if len(extrema) == 4 and extrema[3][0] < 255:
+                return True
+    except Exception:
+        pass
+    return False
+
+
+def _pad_and_shrink_avatar(img_path: str, char_scale: float = 0.35, target_w: int = 720, target_h: int = 1280) -> str:
+    """
+    Pads and shrinks an avatar image onto a 9:16 vertical transparent canvas.
+    Character is scaled down to `char_scale` (35% of canvas height) and positioned
+    in the lower section (top margin >55%), so that when HeyGen renders the video,
+    the character is small and the top title sign ('Trufit Da Comedian') is completely clear.
+    """
+    try:
+        p = Path(img_path)
+        if not p.exists() or any(k in p.name for k in ["mobile_stage", "red_stage", "shrunk_"]):
+            return img_path
+
+        from PIL import Image
+
+        img = Image.open(p).convert("RGBA")
+        w, h = img.size
+
+        # Remove background if image is not transparent
+        if not _has_transparency(img):
+            cleaned = _remove_background(str(p))
+            if cleaned and Path(cleaned).exists():
+                img = Image.open(cleaned).convert("RGBA")
+                w, h = img.size
+
+        max_char_h = int(target_h * char_scale)
+        scale = max_char_h / max(h, 1)
+        new_w = int(w * scale)
+        new_h = int(h * scale)
+
+        if new_w > int(target_w * 0.60):
+            new_w = int(target_w * 0.60)
+            new_h = int(new_w * h / max(w, 1))
+
+        img_resized = img.resize((new_w, new_h), Image.LANCZOS)
+
+        canvas = Image.new("RGBA", (target_w, target_h), (0, 0, 0, 0))
+        x = (target_w - new_w) // 2
+        # Position character low (y starts at 58% height) to leave top 55% completely open for title sign
+        y = int(target_h * 0.58)
+
+        canvas.paste(img_resized, (x, y), img_resized)
+
+        out_path = OUTPUT_DIR / f"shrunk_{p.stem}.png"
+        canvas.save(out_path, "PNG")
+        ok(f"Avatar padded and shrunk for small character framing → {out_path.resolve()}")
+        return str(out_path.resolve())
+    except Exception as e:
+        fail(f"Could not pad/shrink avatar image: {e}")
+        return img_path
+
+
 def _upload_asset(file_path: str, mime: str) -> str | None:
     """Upload any file to POST /v3/assets. Returns asset_id or None."""
+    if mime and mime.startswith("image/") and not any(k in Path(file_path).name for k in ["mobile_stage", "red_stage", "shrunk_"]):
+        file_path = _pad_and_shrink_avatar(file_path, char_scale=0.35)
+        mime = "image/png"
     asset_id, _ = _upload_asset_with_url(file_path, mime)
     return asset_id
 
