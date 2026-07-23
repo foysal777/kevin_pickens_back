@@ -15,12 +15,19 @@ HEYGEN_BASE     = "https://api.heygen.com"
 
 # Fixed background — same for EVERY video
 PROJECT_ROOT = Path(__file__).resolve().parent
-DEFAULT_BACKGROUND_PATH = PROJECT_ROOT / "new_bg.png"
+DEFAULT_BACKGROUND_PATH = PROJECT_ROOT / "stage.jpg"
 BACKGROUND_TEXT = "Trufit Da Comedian"
 
 
 def ensure_background_image(path: Path | None = None) -> Path:
     bg_path = (path or DEFAULT_BACKGROUND_PATH).resolve()
+    if bg_path.exists() and bg_path.stat().st_size > 0:
+        return bg_path
+
+    stage_file = PROJECT_ROOT / "stage.jpg"
+    if stage_file.exists() and stage_file.stat().st_size > 0:
+        return stage_file.resolve()
+
     bg_path.parent.mkdir(parents=True, exist_ok=True)
     try:
         from PIL import Image, ImageDraw, ImageFont
@@ -62,7 +69,7 @@ def ensure_background_image(path: Path | None = None) -> Path:
         draw.text((x + 3, y + 3), BACKGROUND_TEXT, fill=shadow_color, font=font)
         draw.text((x, y), BACKGROUND_TEXT, fill="#fef3c7", font=font)
 
-        img.save(bg_path, format="PNG")
+        img.save(bg_path, format="JPEG" if bg_path.suffix.lower() in [".jpg", ".jpeg"] else "PNG")
     except Exception:
         bg_path.write_bytes(b"")
 
@@ -878,9 +885,25 @@ def _generate_local_video(avatar: dict, audio_path: Path | None) -> str | None:
     ok(f"Creating local video from image → {image_path} and audio → {audio_path}")
 
     try:
+        from PIL import Image
         import subprocess
+
+        bg_path = ensure_background_image(DEFAULT_BACKGROUND_PATH)
+        bg_image = Image.open(bg_path).convert("RGBA")
+        avatar_image = Image.open(image_path).convert("RGBA")
+        avatar_width = int(bg_image.width * 0.35)
+        avatar_height = int(avatar_width * avatar_image.height / max(avatar_image.width, 1))
+        avatar_image = avatar_image.resize((avatar_width, avatar_height), Image.LANCZOS)
+        # Position character in the middle of the stage (centered horizontally and vertically)
+        x = (bg_image.width - avatar_image.width) // 2
+        y = (bg_image.height - avatar_image.height) // 2
+        composite_path = OUTPUT_DIR / f"composite_{ts}.png"
+        bg_image_copy = bg_image.copy()
+        bg_image_copy.paste(avatar_image, (x, y), avatar_image)
+        bg_image_copy.save(composite_path, format="PNG")
+
         cmd = [
-            "ffmpeg", "-y", "-loop", "1", "-i", str(image_path),
+            "ffmpeg", "-y", "-loop", "1", "-i", str(composite_path),
             "-i", str(audio_path), "-c:v", "libx264", "-preset", "medium",
             "-pix_fmt", "yuv420p", "-shortest", str(out)
         ]
