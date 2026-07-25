@@ -483,7 +483,7 @@ class VideoStatusView(generics.GenericAPIView):
         elif video_obj.status == 'processing':
             message = "Video is currently processing."
         else:
-            if video_obj.error_message and any(k in video_obj.error_message.lower() for k in ["quota", "credit", "payment", "limit", "exhausted"]):
+            if video_obj.error_message and any(k in video_obj.error_message.lower() for k in ["quota is finished", "out of credit", "insufficient credit"]):
                 message = "Heygen quota is finished"
             else:
                 message = video_obj.error_message or "Video generation failed."

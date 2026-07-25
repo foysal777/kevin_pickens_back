@@ -180,11 +180,14 @@ def check_heygen_quota_error(response_or_text) -> str | None:
         text = str(response_or_text)
 
     low_text = text.lower()
+    if "concurrent" in low_text or "rate limit" in low_text:
+        return "HeyGen concurrent generation limit reached. Please wait for active videos to complete and try again."
+
     quota_keywords = [
-        "quota", "credit", "payment", "limit", "exhausted",
-        "insufficient", "not enough", "expired", "sub_required", "402", "trial"
+        "out of credit", "insufficient credit", "not enough credit",
+        "quota exhausted", "quota exceeded", "sub_required", "payment_required", "trial expired"
     ]
-    if status_code in (402, 429) or any(k in low_text for k in quota_keywords):
+    if status_code == 402 or any(k in low_text for k in quota_keywords):
         return "Heygen quota is finished"
     return None
 
