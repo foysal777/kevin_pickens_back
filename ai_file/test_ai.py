@@ -727,15 +727,15 @@ def _create_avatar_from_payload(payload: dict, avatar_name: str, is_cartoon: boo
         if status in READY_STATUSES:
             ok(f"Avatar ready immediately: {look_id}")
             SUMMARY["avatar"]["final_status"] = status
-            return {"source": "custom", "avatar_id": look_id, "name": avatar_name, "preview_url": preview_url, "engine": engine}
+            return {"source": "custom", "avatar_id": look_id, "name": avatar_name, "preview_url": preview_url, "engine": engine, "status": status}
 
         if not wait:
             # Return immediately without waiting for it to compile/process
             SUMMARY["avatar"]["final_status"] = status
-            return {"source": "custom", "avatar_id": look_id, "name": avatar_name, "preview_url": preview_url, "engine": engine}
+            return {"source": "custom", "avatar_id": look_id, "name": avatar_name, "preview_url": preview_url, "engine": engine, "status": status}
 
         look_id, preview_url = _wait_for_avatar(look_id, preview_url, max_wait=600 if is_cartoon else 300, is_cartoon=is_cartoon)
-        return {"source": "custom", "avatar_id": look_id, "name": avatar_name, "preview_url": preview_url, "engine": engine}
+        return {"source": "custom", "avatar_id": look_id, "name": avatar_name, "preview_url": preview_url, "engine": engine, "status": status}
     except requests.RequestException as e:
         fail(f"Avatar creation request error: {e}")
         return None

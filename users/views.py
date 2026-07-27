@@ -217,6 +217,12 @@ class UploadAvatarView(generics.CreateAPIView):
         # Inject heygen_avatar context + ensure image fields are populated from heygen_info
         data["heygen_avatar"] = heygen_avatar or None
 
+        # Set status in response
+        if heygen_avatar and "status" in heygen_avatar:
+            data["status"] = heygen_avatar["status"]
+        else:
+            data["status"] = "processing"
+
         # If serializer returned empty urls but we have data from heygen_info, patch them in
         if heygen_info:
             if not data.get("heygen_image_urls") and heygen_info.get("image_urls"):
@@ -225,6 +231,14 @@ class UploadAvatarView(generics.CreateAPIView):
                 data["heygen_preview_url"] = serializers.ensure_https(heygen_info["preview_image_url"])
             if not data.get("heygen_avatar_info"):
                 data["heygen_avatar_info"] = heygen_info
+        else:
+            if not data.get("heygen_avatar_info"):
+                data["heygen_avatar_info"] = {
+                    "avatar_id": avatar_instance.heygen_avatar_id or "",
+                    "status": data["status"],
+                    "preview_image_url": None,
+                    "image_urls": []
+                }
 
         # Ensure heygen_generated_image is always present:
         # prioritise HeyGen CDN preview → first image_url → local avatar file
