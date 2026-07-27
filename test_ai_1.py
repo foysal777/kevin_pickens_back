@@ -22,9 +22,6 @@ BACKGROUND_TEXT = "Trufit Da Comedian"
 
 def ensure_background_image(path: Path | None = None) -> Path:
     bg_path = (path or DEFAULT_BACKGROUND_PATH).resolve()
-    if bg_path.exists() and bg_path.stat().st_size > 0:
-        return bg_path
-
     bg_path.parent.mkdir(parents=True, exist_ok=True)
     try:
         from PIL import Image, ImageDraw, ImageFont
@@ -61,23 +58,23 @@ def ensure_background_image(path: Path | None = None) -> Path:
                     b = int(15 * v_grad)
                     draw.point((x, y), fill=(r, g, b, 255))
 
-        # Add Marquee Sign for 'Trufit Da Comedian' at very top of mobile frame
+        # Add Marquee Sign for 'Trufit Da Comedian' at very top of mobile frame (smaller, higher up)
         draw = ImageDraw.Draw(img)
         try:
-            font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 38)
+            font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 30)
         except Exception:
             font = ImageFont.load_default()
 
         bbox = draw.textbbox((0, 0), BACKGROUND_TEXT, font=font)
         tw, th = bbox[2] - bbox[0], bbox[3] - bbox[1]
 
-        px1, py1 = (target_w - tw) // 2 - 25, 45
-        px2, py2 = (target_w + tw) // 2 + 25, 45 + th + 22
+        px1, py1 = (target_w - tw) // 2 - 15, 15
+        px2, py2 = (target_w + tw) // 2 + 15, 15 + th + 10
 
         plate = Image.new("RGBA", (target_w, target_h), (0, 0, 0, 0))
         plate_draw = ImageDraw.Draw(plate)
-        plate_draw.rounded_rectangle((px1, py1, px2, py2), radius=14, fill=(30, 5, 10, 230), outline=(230, 180, 50, 255), width=3)
-        plate_draw.rounded_rectangle((px1 - 2, py1 - 2, px2 + 2, py2 + 2), radius=16, fill=None, outline=(255, 225, 120, 180), width=2)
+        plate_draw.rounded_rectangle((px1, py1, px2, py2), radius=10, fill=(30, 5, 10, 230), outline=(230, 180, 50, 255), width=3)
+        plate_draw.rounded_rectangle((px1 - 2, py1 - 2, px2 + 2, py2 + 2), radius=12, fill=None, outline=(255, 225, 120, 180), width=2)
 
         img = Image.alpha_composite(img.convert("RGBA"), plate).convert("RGB")
         draw = ImageDraw.Draw(img)
