@@ -21,3 +21,5 @@ urlpatterns = [
     path("video-delete/", user_views.DeleteVideoView.as_view(), name="video-delete"),
     path("video-delete/<int:id>/", user_views.DeleteVideoView.as_view(), name="video-delete-detail"),
 ]
+
+#new endpoint
