@@ -118,7 +118,7 @@ def text_to_video_task(self, video_id, text, avatar_id, is_cartoon, voice_id):
             }
 
         # 4) Generate video using HeyGen
-        video_url = test_ai.generate_video(avatar_payload, audio_asset_id)
+        video_url = test_ai.generate_video(avatar_payload, audio_asset_id, audio_path=Path(tts_path) if tts_path else None)
         if not video_url:
             raise Exception("Video generation failed on HeyGen.")
 

@@ -128,21 +128,18 @@ DEFAULT_AVATARS = {
 
 # Fixed System Prompt for Cartoon Avatar Generation (Standup Comedy)
 CARTOON_AVATAR_SYSTEM_PROMPT = """
-Transform this person's photo into an expressive cartoon avatar for standup comedy performances.
+Transform this photo into an expressive cartoon avatar for standup comedy.
 
-Requirements:
-- Convert the realistic face into a vibrant, animated cartoon style
-- SMALL CHARACTER FRAMING: Character must be small and positioned in the lower 40% portion of the frame
-- LARGE TOP PADDING: Leave generous empty background / top padding (at least 55% empty top margin above the head)
-- Do NOT zoom in on the head or face. Character head must be small and positioned low so top background title sign is completely visible.
-- Include stage-ready attire appropriate for standup comedy (shirt or blazer)
-- Make the avatar appear confident, energetic, and performance-ready
-- Ensure high expressiveness to convey comedy emotions and punchlines
-- Keep proportions recognizable but distinctly cartoon-like
-- Use warm, friendly color palette to appeal to comedy audiences
+Style & Framing Requirements:
+- Convert realistic face to a vibrant, animated 2D cartoon style.
+- SMALL FRAMING: Character must be small, positioned in the lower 40% of the frame.
+- LARGE TOP PADDING: Leave at least 55% empty background space/top margin above the head.
+- Do NOT zoom in. Head must be small & low so the top background is completely visible.
+- Dress in stage-ready attire (shirt or blazer).
+- Expressive, confident, and energetic performance-ready look to convey comedy emotions.
+- Keep recognizable proportions but distinctly cartoon-like with warm, friendly colors.
 
-Context: This avatar will perform standup comedy material with lip-sync video on stage. 
-Prioritize expressions that convey humor, timing, and stage presence.
+Context: Used for standup comedy with lip-sync. Prioritize expressions conveying humor and timing.
 """
 
 SUMMARY = {
@@ -687,6 +684,8 @@ def _create_cartoon_avatar(image_asset_id: str, avatar_name: str = "UploadedCart
 
 
 def _create_avatar_from_payload(payload: dict, avatar_name: str, is_cartoon: bool, wait: bool = True) -> dict | None:
+    if "prompt" in payload and isinstance(payload["prompt"], str) and len(payload["prompt"]) > 1000:
+        payload["prompt"] = payload["prompt"][:997] + "..."
     try:
         r = requests.post(
             f"{HEYGEN_BASE}/v3/avatars",
@@ -1357,6 +1356,11 @@ def generate_video(avatar: dict, audio_asset_id: str, audio_path: Path | None = 
         info(f"Submit response:\n{json.dumps(d, indent=4)}")
 
         if r.status_code not in (200, 201):
+            if audio_path and audio_path.exists():
+                info("HeyGen API submission failed or API credits unavailable. Falling back to local video rendering...")
+                local_url = _generate_local_video(avatar, audio_path)
+                if local_url:
+                    return local_url
             q_err = check_heygen_quota_error(r)
             if q_err:
                 fail(q_err)

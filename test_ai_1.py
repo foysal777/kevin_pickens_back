@@ -126,27 +126,18 @@ DEFAULT_AVATARS = {
 # Prioritize expressions that convey humor, timing, and stage presence.
 # """
 CARTOON_AVATAR_SYSTEM_PROMPT = """
-Transform this person's photo into a friendly, 2D vector-style cartoon avatar for a standup comedy lip-sync performance. Maintain the subject's exact identity, Attire, skin tone, and hair, but apply the following specific style constraints:
- 
-Style & Rendering:
- 
-Create a 2D vector art illustration with a modern digital cartoon aesthetic.
- 
-Use flat, vibrant colors with crisp, clean bold black outlines.
- 
-Apply smooth, sharp cel-shaded lighting. Strictly avoid harsh, dark, or dramatic shadows.
- 
-Keep the background simple, solid, and minimalist.
- 
-Expression & Vibe (Crucial):
- 
-The avatar must look incredibly warm, cheerful, energetic, and approachable.
- 
-Enhance the smile and eyes to be bright and positive for comedy, but strictly avoid over-exaggerating facial features.
- 
-Do not use sharp angles, heavily arched eyebrows, or overly wide grins. Ensure the character looks kind, not sinister or villainous.
- 
-Keep facial proportions recognizable, soft, and distinctly human.
+Transform this photo into an expressive cartoon avatar for standup comedy.
+
+Style & Framing Requirements:
+- Convert realistic face to a vibrant, animated 2D cartoon style.
+- SMALL FRAMING: Character must be small, positioned in the lower 40% of the frame.
+- LARGE TOP PADDING: Leave at least 55% empty background space/top margin above the head.
+- Do NOT zoom in. Head must be small & low so the top background is completely visible.
+- Dress in stage-ready attire (shirt or blazer).
+- Expressive, confident, and energetic performance-ready look to convey comedy emotions.
+- Keep recognizable proportions but distinctly cartoon-like with warm, friendly colors.
+
+Context: Used for standup comedy with lip-sync. Prioritize expressions conveying humor and timing.
 """
 SUMMARY = {
     "run_time":    datetime.now().isoformat(),
@@ -582,7 +573,8 @@ def _create_avatar_from_image(img_path: str, avatar_name: str, do_rembg: bool, p
             ],
         }
 
-    info(f"Request payload:\n{json.dumps(payload, indent=4)}")
+    if "prompt" in payload and isinstance(payload["prompt"], str) and len(payload["prompt"]) > 1000:
+        payload["prompt"] = payload["prompt"][:997] + "..."
 
     try:
         r = requests.post(
@@ -934,6 +926,11 @@ def generate_video(avatar: dict, audio_asset_id: str, audio_path: Path | None = 
         info(f"Submit response:\n{json.dumps(d, indent=4)}")
 
         if r.status_code not in (200, 201):
+            if audio_path and audio_path.exists():
+                info("HeyGen API submission failed or API credits unavailable. Falling back to local video rendering...")
+                local_url = _generate_local_video(avatar, audio_path)
+                if local_url:
+                    return local_url
             q_err = check_heygen_quota_error(r)
             if q_err:
                 fail(q_err)
