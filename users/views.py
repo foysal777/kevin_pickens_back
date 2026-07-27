@@ -184,8 +184,8 @@ class UploadAvatarView(generics.CreateAPIView):
             mime = test_ai._guess_mime(img_path)
             image_asset_id = test_ai._upload_asset(img_path, mime)
             if image_asset_id:
-                # Create cartoon avatar on HeyGen using uploaded asset with long-polling (wait=True)
-                heygen_avatar = test_ai._create_cartoon_avatar(image_asset_id, avatar_name=f"avatar_{avatar_instance.id}", wait=True)
+                # Create cartoon avatar on HeyGen using uploaded asset without blocking (wait=False)
+                heygen_avatar = test_ai._create_cartoon_avatar(image_asset_id, avatar_name=f"avatar_{avatar_instance.id}", wait=False)
                 if heygen_avatar and isinstance(heygen_avatar, dict) and heygen_avatar.get("avatar_id"):
                     avatar_instance.heygen_avatar_id = heygen_avatar.get("avatar_id")
                     avatar_instance.save(update_fields=["heygen_avatar_id"])
@@ -237,6 +237,77 @@ class UploadAvatarView(generics.CreateAPIView):
             data["heygen_generated_image"] = serializers.ensure_https(generated_img)
 
         return Response(data, status=status.HTTP_201_CREATED)
+
+    @swagger_auto_schema(
+        operation_id="get_avatar_status",
+        operation_description="Get the status of an uploaded avatar by ID, checking HeyGen for status updates.",
+        manual_parameters=[
+            openapi.Parameter(
+                name="id",
+                in_=openapi.IN_QUERY,
+                type=openapi.TYPE_INTEGER,
+                required=True,
+                description="Database ID of the Avatar"
+            )
+        ],
+        responses={
+            200: serializers.AvatarList,
+            400: "Missing avatar ID",
+            404: "Avatar not found"
+        },
+        tags=["Avatar"]
+    )
+    def get(self, request, *args, **kwargs):
+        avatar_id = request.query_params.get("id")
+        if not avatar_id:
+            return Response({"error": "Avatar ID is required in query parameters (e.g. ?id=1)."}, status=status.HTTP_400_BAD_REQUEST)
+        
+        try:
+            avatar_instance = models.Avatar.objects.get(id=avatar_id)
+        except models.Avatar.DoesNotExist:
+            return Response({"error": f"Avatar with ID {avatar_id} not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        # Refresh avatar info from HeyGen if heygen_avatar_id exists
+        heygen_info = None
+        if avatar_instance.heygen_avatar_id:
+            try:
+                heygen_info = test_ai.fetch_heygen_avatar_info(avatar_instance.heygen_avatar_id)
+                if heygen_info:
+                    preview = heygen_info.get("preview_image_url") or ""
+                    img_urls = heygen_info.get("image_urls") or []
+                    if not img_urls and preview:
+                        img_urls = [preview]
+                    # Update DB fields if we fetched new preview/image URLs
+                    if preview or img_urls:
+                        avatar_instance.heygen_preview_url = preview
+                        avatar_instance.heygen_image_urls = img_urls
+                        avatar_instance.save(update_fields=["heygen_preview_url", "heygen_image_urls"])
+            except Exception as fe:
+                print(f"[image-upload-to-avatar GET] fetch_heygen_avatar_info failed: {fe}")
+
+        avatar_instance.refresh_from_db()
+        out_serializer = serializers.AvatarList(avatar_instance, context={"request": request})
+        data = out_serializer.data
+
+        # If we have heygen_info, patch it into the serializer output context
+        if heygen_info:
+            if not data.get("heygen_image_urls") and heygen_info.get("image_urls"):
+                data["heygen_image_urls"] = [serializers.ensure_https(u) for u in heygen_info["image_urls"] if u]
+            if not data.get("heygen_preview_url") and heygen_info.get("preview_image_url"):
+                data["heygen_preview_url"] = serializers.ensure_https(heygen_info["preview_image_url"])
+            if not data.get("heygen_avatar_info"):
+                data["heygen_avatar_info"] = heygen_info
+
+        # Ensure heygen_generated_image is always present
+        if not data.get("heygen_generated_image"):
+            generated_img = (
+                data.get("heygen_preview_url")
+                or (data.get("heygen_image_urls") or [None])[0]
+                or data.get("avatar")
+            )
+            data["heygen_generated_image"] = serializers.ensure_https(generated_img)
+
+        return Response(data, status=status.HTTP_200_OK)
 
 
 

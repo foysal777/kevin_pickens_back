@@ -87,6 +87,29 @@ def text_to_video_task(self, video_id, text, avatar_id, is_cartoon, voice_id):
                 avatar_obj = models.Avatar.objects.get(id=avatar_id)
                 # inside Celery background task, we can safely wait (wait=True)
                 if avatar_obj.heygen_avatar_id and (is_cartoon or avatar_obj.is_cartoon):
+                    # Since avatar creation on HeyGen is async, wait/poll for it to be ready
+                    logger.info(f"Avatar {avatar_id} has heygen_avatar_id={avatar_obj.heygen_avatar_id}. Polling/waiting for it to be ready...")
+                    look_id, preview_url = test_ai._wait_for_avatar(
+                        avatar_obj.heygen_avatar_id,
+                        avatar_obj.heygen_preview_url or "",
+                        max_wait=600,
+                        is_cartoon=True
+                    )
+                    info_data = test_ai.fetch_heygen_avatar_info(look_id)
+                    status = info_data.get("status") if info_data else "unknown"
+                    if status not in test_ai.READY_STATUSES:
+                        raise Exception(f"Avatar {look_id} is not ready (status={status}). Cannot proceed with video generation.")
+
+                    if info_data:
+                        preview = info_data.get("preview_image_url") or preview_url or ""
+                        img_urls = info_data.get("image_urls") or []
+                        if not img_urls and preview:
+                            img_urls = [preview]
+                        if preview or img_urls:
+                            avatar_obj.heygen_preview_url = preview
+                            avatar_obj.heygen_image_urls = img_urls
+                            avatar_obj.save(update_fields=["heygen_preview_url", "heygen_image_urls"])
+
                     avatar_payload = {
                         "source": "remote",
                         "avatar_id": avatar_obj.heygen_avatar_id,
