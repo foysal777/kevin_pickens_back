@@ -31,6 +31,7 @@ def ensure_background_image(path: Path | None = None) -> Path:
     bg_path.parent.mkdir(parents=True, exist_ok=True)
     try:
         from PIL import Image, ImageDraw, ImageFont
+        Image.MAX_IMAGE_PIXELS = None
 
         target_w, target_h = 720, 1280
 
@@ -487,8 +488,13 @@ def _pad_and_shrink_avatar(img_path: str, char_scale: float = 0.35, target_w: in
             return img_path
 
         from PIL import Image
+        Image.MAX_IMAGE_PIXELS = None
 
         img = Image.open(p).convert("RGBA")
+        # For large images (>20MB or high resolution), resize down to max 2560px
+        max_dim = 2560
+        if max(img.size) > max_dim:
+            img.thumbnail((max_dim, max_dim), Image.LANCZOS)
         w, h = img.size
 
         # Remove background if image is not transparent
@@ -496,6 +502,8 @@ def _pad_and_shrink_avatar(img_path: str, char_scale: float = 0.35, target_w: in
             cleaned = _remove_background(str(p))
             if cleaned and Path(cleaned).exists():
                 img = Image.open(cleaned).convert("RGBA")
+                if max(img.size) > max_dim:
+                    img.thumbnail((max_dim, max_dim), Image.LANCZOS)
                 w, h = img.size
 
         max_char_h = int(target_h * char_scale)
@@ -609,12 +617,19 @@ def cartoon_image_generator(image_source) -> str | None:
     else:
         suffix = Path(str(image_source)).suffix
 
-    image_path = _save_input_file(image_source, f"cartoon_input{suffix}")
+    unique_id = f"{int(time.time() * 1000)}_{os.urandom(4).hex()}"
+    image_path = _save_input_file(image_source, f"cartoon_input_{unique_id}{suffix}")
     cartoon_path = OUTPUT_DIR / f"cartoon_{Path(image_path).stem}.png"
     try:
         from PIL import Image, ImageFilter, ImageOps
+        Image.MAX_IMAGE_PIXELS = None
 
         img = Image.open(image_path).convert("RGB")
+        # Handle large (>20MB or ultra high-res) images by constraining max dimension to 2560px
+        max_dim = 2560
+        if max(img.size) > max_dim:
+            img.thumbnail((max_dim, max_dim), Image.LANCZOS)
+
         img = img.filter(ImageFilter.SMOOTH_MORE)
         img = ImageOps.posterize(img, 3)
 
@@ -623,7 +638,7 @@ def cartoon_image_generator(image_source) -> str | None:
         edge = edge.convert("RGB")
 
         img = Image.blend(img, edge, alpha=0.25)
-        img.save(cartoon_path, format="PNG")
+        img.save(cartoon_path, format="PNG", optimize=True)
 
         ok(f"Cartoon image generated → {cartoon_path.resolve()}")
         return str(cartoon_path)
@@ -874,9 +889,21 @@ def _remove_background(img_path: str) -> str:
         from rembg import remove
         from PIL import Image
         import io
+        Image.MAX_IMAGE_PIXELS = None
 
         with open(img_path, "rb") as f:
             img_bytes = f.read()
+
+        # If original image is very large, downscale into buffer for efficient background removal
+        try:
+            temp_img = Image.open(io.BytesIO(img_bytes))
+            if max(temp_img.size) > 2048:
+                temp_img.thumbnail((2048, 2048), Image.LANCZOS)
+                buf = io.BytesIO()
+                temp_img.save(buf, format="PNG")
+                img_bytes = buf.getvalue()
+        except Exception:
+            pass
 
         info("Running AI background removal (first run downloads ~170MB model)…")
         result_bytes = remove(img_bytes)
@@ -1422,6 +1449,7 @@ def _generate_local_video(avatar: dict, audio_path: Path | None) -> str | None:
     try:
         from PIL import Image
         import subprocess
+        Image.MAX_IMAGE_PIXELS = None
 
         bg_path = ensure_background_image(DEFAULT_BACKGROUND_PATH)
         bg_image = Image.open(bg_path).convert("RGBA")

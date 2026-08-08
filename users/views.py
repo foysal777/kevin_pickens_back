@@ -115,7 +115,7 @@ class UploadAvatarView(generics.CreateAPIView):
                 in_=openapi.IN_FORM,
                 type=openapi.TYPE_FILE,
                 required=True,
-                description="Avatar photo/image file to upload"
+                description="Avatar photo/image file to upload (supports 20MB+ large files)"
             ),
             openapi.Parameter(
                 name="is_cartoon",
